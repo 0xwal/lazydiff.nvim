@@ -53,13 +53,17 @@ function M.root(dir)
   return out
 end
 
--- `.jj/repo` is where the operation log heads and the commit index live, so it
--- is what the baseline watcher observes. `.jj` may be a file in a repo that
--- was created against an older jj; then there is nothing to watch and the
+-- `.jj/repo/op_heads` is where the operation log heads live, so it is what
+-- the baseline watcher observes. `.jj` may be a file in a repo that was
+-- created against an older jj; then there is nothing to watch and the
 -- watcher stays off.
 function M.state_dir(root)
   if not root or root == "" then
     return nil
+  end
+  local heads = root .. "/.jj/repo/op_heads"
+  if vim.fn.isdirectory(heads) == 1 then
+    return heads
   end
   local dir = root .. "/.jj/repo"
   if vim.fn.isdirectory(dir) == 1 then
@@ -68,10 +72,10 @@ function M.state_dir(root)
   return nil
 end
 
--- Entries jj rewrites under `.jj/repo` on a commit, checkout or rebase. Any
--- of them changing means the baseline moved.
+-- Entries jj rewrites under `.jj/repo/op_heads` on a commit, checkout or
+-- rebase. Any of them changing means the baseline moved.
 function M.watch_names()
-  return { "op_heads", "index" }
+  return { "heads" }
 end
 
 -- Bookmark names plus the two revisions every jj user types by hand. `@` (the
@@ -86,6 +90,14 @@ function M.refs(root)
   end
   add("@")
   add("@-")
+
+  local log_code, log_out =
+    run(root, { "log", "-r", "::@", "--limit", "50", "--no-graph", "-T", 'change_id ++ "\\n"' })
+  if log_code == 0 then
+    for _, line in ipairs(lines_of(log_out)) do
+      add(trim(line))
+    end
+  end
 
   local code, out = run(root, { "bookmark", "list", "--all-remotes", "--template", 'name ++ "\n"' })
   if code ~= 0 then
@@ -102,6 +114,7 @@ end
 -- scan each time. Entries expire after a few seconds, and an op change makes
 -- them stale immediately.
 local TRACKED_TTL_MS = 3000
+local TRACKED_CACHE_MAX = 32
 local tracked_cache = {}
 
 -- Current operation heads, read from the files jj keeps on disk, so the
@@ -138,12 +151,18 @@ local function tracked_paths(root, ref)
   local now = vim.uv.now()
   if cached then
     local op = current_op(root)
-    if now - cached.time < TRACKED_TTL_MS and (op == nil or op == cached.op) then
+    if
+      op ~= nil
+      and cached.op ~= nil
+      and op == cached.op
+      and now - cached.time < TRACKED_TTL_MS
+    then
       return cached.paths
     end
     tracked_cache[key] = nil
   end
 
+  local op = current_op(root)
   local code, out = run(root, { "file", "list", "-r", ref })
   if code ~= 0 then
     return nil
@@ -152,19 +171,47 @@ local function tracked_paths(root, ref)
   for _, line in ipairs(lines_of(out)) do
     paths[line] = true
   end
-  tracked_cache[key] = { paths = paths, time = now, op = current_op(root) }
+  if vim.tbl_count(tracked_cache) >= TRACKED_CACHE_MAX then
+    local oldest_key, oldest_time
+    for k, entry in pairs(tracked_cache) do
+      if not oldest_time or entry.time < oldest_time then
+        oldest_key, oldest_time = k, entry.time
+      end
+    end
+    tracked_cache[oldest_key] = nil
+  end
+  if op ~= nil then
+    tracked_cache[key] = { paths = paths, time = now, op = op }
+  end
   return paths
 end
 
+-- `ref` names the old state in the adapter contract, but a jj revset names
+-- the change itself: `-r @` is the working-copy commit, whose content is
+-- exactly what the buffer already holds. The old state is the first parent,
+-- spelled as the `first_parent` revset function.
+local function parent_rev(rev)
+  return "first_parent(" .. rev .. ")"
+end
+
 -- Same contract as the git adapter: content, or nil + message + reason, with
--- reason "untracked" when the path simply does not exist at `ref`.
+-- reason "untracked" when the path simply does not exist at the baseline.
+-- A revision with no parent (the root commit) has an empty baseline, so it
+-- comes back as reason "untracked" too. Every other failure comes back as
+-- reason "error" and nothing throws.
 function M.file_at(root, relpath, ref)
   ref = resolve_ref(ref)
-  local code, out, err = run(root, { "file", "show", "-r", ref, relpath })
+  local prev = parent_rev(ref)
+  local code, out, err = run(root, { "file", "show", "-r", prev, "--", relpath })
   if code == 0 then
     return out, nil
   end
-  local paths = tracked_paths(root, ref)
+  local parent_code, parent_out =
+    run(root, { "log", "-r", ref, "--no-graph", "-T", 'parents.map(|c| c.commit_id()).join(",")' })
+  if parent_code == 0 and trim(parent_out) == "" then
+    return nil, "revision " .. ref .. " has no parent", "untracked"
+  end
+  local paths = tracked_paths(root, prev)
   if paths and not paths[relpath] then
     return nil, "file is not tracked at " .. ref, "untracked"
   end
@@ -188,6 +235,21 @@ local function split_arrow(text)
   return nil, text
 end
 
+-- Rebuilds one side of a folded rename. The empty segment a move into or out
+-- of a directory produces (`dir/{ => sub}/f`) would otherwise leave a `//` at
+-- the junction, so that single separator is dropped -- segments themselves are
+-- never trimmed, because spaces inside a path are legal.
+local function unfold(prefix, segment, suffix)
+  if segment ~= "" then
+    return prefix .. segment .. suffix
+  end
+  local head = prefix
+  if head:sub(-1) == "/" then
+    head = head:sub(1, -2)
+  end
+  return head .. suffix
+end
+
 -- Returns old, new. `new` is always the remaining text when no arrow exists.
 local function split_rename(text)
   local open = text:find("{", 1, true)
@@ -197,7 +259,7 @@ local function split_rename(text)
     if old then
       local prefix = text:sub(1, open - 1)
       local suffix = text:sub(close + 1)
-      return prefix .. old .. suffix, prefix .. new .. suffix
+      return unfold(prefix, old, suffix), unfold(prefix, new, suffix)
     end
   end
   local old, new = split_arrow(text)

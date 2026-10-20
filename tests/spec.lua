@@ -754,15 +754,16 @@ else
   check("the .jj marker selects the jj backend", backend and backend.name == "jj", tostring(jerr))
   check("detection walks up from a subdirectory", root == jj.root(jjdir), tostring(root))
   local colocated = vim.uv.fs_stat(jjdir .. "/.git") ~= nil
-  check(
-    "jj wins over a colocated .git",
-    not colocated or (vcs.get(jjdir) or {}).name == "jj"
-  )
+  check("jj wins over a colocated .git", not colocated or (vcs.get(jjdir) or {}).name == "jj")
 
   local state_dir = backend.state_dir(root)
   check(
     "state_dir() is the .jj/repo directory",
-    state_dir ~= nil and state_dir:sub(-#".jj/repo") == ".jj/repo",
+    state_dir ~= nil
+      and (
+        state_dir:sub(-#".jj/repo") == ".jj/repo"
+        or state_dir:sub(-#".jj/repo/op_heads") == ".jj/repo/op_heads"
+      ),
     tostring(state_dir)
   )
   check("watch_names() returns a list", type(backend.watch_names()) == "table")
@@ -799,9 +800,21 @@ else
     "a missing path is reported untracked",
     select(3, backend.file_at(root, "nope.txt", "@")) == "untracked"
   )
+  check("HEAD maps to @", select(1, backend.file_at(root, "kept.txt", "HEAD")) == "one\ntwo\n")
+
+  -- The baseline is the parent of the ref, so `@` compares the working copy
+  -- against the commit it sits on. Reading `@` directly would return the
+  -- on-disk content and every hunk would come out empty.
+  local jbase = select(1, backend.file_at(root, "modified.txt", "@"))
+  check("file_at(@) is the parent content", jbase == "one\ntwo\n", tostring(jbase))
+  local jhunks = require("lazydiff.diff").compute(
+    vim.split(jbase or "", "\n", { plain = true, trimempty = true }),
+    { "one", "two", "three" }
+  )
   check(
-    "HEAD maps to @",
-    select(1, backend.file_at(root, "kept.txt", "HEAD")) == "one\ntwo\n"
+    "so an inline diff against @ is not empty",
+    type(jhunks) == "table" and #jhunks > 0,
+    vim.inspect(jhunks)
   )
 
   vim.cmd.edit(jjdir .. "/modified.txt")

@@ -42,9 +42,13 @@ float.
 
 - Neovim ≥ 0.10 (uses `vim.diff` with `result_type = "indices"` and
   `vim.system`)
-- `git` on `$PATH`
+- `git` on `$PATH`, or `jj` for a jj repo (the `.jj` marker selects that
+  backend)
 
 Run `:checkhealth lazydiff` to confirm both.
+
+For jj, the plugin compares against the parent of the selected revision, so
+`:Lazydiff @` diffs the working copy against its parent.
 
 ## Install
 

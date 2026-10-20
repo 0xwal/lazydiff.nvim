@@ -106,6 +106,9 @@ local function watch_key(state)
     return nil
   end
   local names = state.backend and state.backend.watch_names() or {}
+  if #names == 0 then
+    return ""
+  end
   return state.state_dir .. "\0" .. table.concat(names, ",")
 end
 
@@ -146,6 +149,7 @@ local function start_watcher(bufnr, state)
   if #names == 0 then
     -- An empty list means nothing in the directory is worth reacting to, so
     -- watching it would only accept every event for no reason.
+    state.watch_key = ""
     return
   end
   local watched = {}
@@ -266,8 +270,12 @@ function M.enable(bufnr, ref)
 
   local baseline, berr, reason = fetch_baseline(loc, ref)
   if not baseline then
-    notify(berr, vim.log.levels.WARN)
-    return false
+    if reason == "untracked" then
+      baseline = {}
+    else
+      notify(berr, vim.log.levels.WARN)
+      return false
+    end
   end
 
   local hunks = recompute(bufnr, baseline)
@@ -363,28 +371,20 @@ function M.refresh(bufnr, opts)
   if not state.external then
     local path = buf_path(bufnr)
     local wanted = vcs.configured()
-    local forced_elsewhere =
-      wanted ~= nil and wanted ~= "auto" and wanted ~= (state.backend and state.backend.name)
+    local forced_elsewhere = wanted ~= nil
+      and wanted ~= "auto"
+      and wanted ~= (state.backend and state.backend.name)
     local loc, moved
     if opts.baseline or path ~= state.path or forced_elsewhere then
       loc = locate(bufnr)
-      -- Remember the name even when it left the repo, so a plain refresh does
-      -- not re-run detection on every change. A baseline refresh locates anyway.
-      state.path = path
       if loc then
         moved = loc.repo ~= state.repo or loc.rel ~= state.rel or loc.backend ~= state.backend
-        state.repo = loc.repo
-        state.rel = loc.rel
-        state.backend = loc.backend
-        state.state_dir = loc.backend.state_dir(loc.repo)
-        if watch_key(state) ~= state.watch_key then
-          start_watcher(bufnr, state)
-        end
       end
     end
 
     -- The old baseline belongs to the old repo, path or backend, so a moved
     -- buffer refetches even when the caller did not ask for it.
+    local fetch_failed = false
     if opts.baseline or moved then
       -- locate() can fail after a :saveas out of the repo; the last known
       -- location stays valid enough to refetch from.
@@ -396,8 +396,24 @@ function M.refresh(bufnr, opts)
         -- The file vanished from `ref` (e.g. checkout of an older branch):
         -- everything in the buffer is now new.
         state.baseline = {}
+      else
+        fetch_failed = true
+      end
+      if not fetch_failed and loc then
+        state.repo = loc.repo
+        state.rel = loc.rel
+        state.backend = loc.backend
+        state.state_dir = loc.backend.state_dir(loc.repo)
+        if watch_key(state) ~= state.watch_key then
+          start_watcher(bufnr, state)
+        end
       end
       -- Any other failure keeps the last known baseline.
+    end
+    -- Remember the name even when it left the repo, so a plain refresh does
+    -- not re-run detection on every change. A baseline refresh locates anyway.
+    if not fetch_failed then
+      state.path = path
     end
   end
 
@@ -416,6 +432,12 @@ function M.attach(bufnr, opts)
   bufnr = resolve(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
+  end
+  local previous = buffers[bufnr]
+  if previous and previous.enabled then
+    stop_timer(previous)
+    stop_watcher(previous)
+    teardown_autocmds(previous)
   end
   highlights.setup()
   buffers[bufnr] = {

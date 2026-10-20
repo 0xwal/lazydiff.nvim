@@ -22,6 +22,7 @@ local config = require("lazydiff.config")
 local DETECT_ORDER = { "jj", "git" }
 local MARKER = { jj = ".jj", git = ".git" }
 local VALID = { auto = true, git = true, jj = true }
+local MAX_DEPTH = 64
 
 local function load(name)
   return require("lazydiff.vcs." .. name)
@@ -42,7 +43,8 @@ end
 local function detect(dir)
   local found_git = false
   local level = dir
-  while level and level ~= "" do
+  local depth = 0
+  while level and level ~= "" and depth < MAX_DEPTH do
     for _, name in ipairs(DETECT_ORDER) do
       if has_marker(level, name) then
         if name == "jj" then
@@ -56,6 +58,7 @@ local function detect(dir)
       break
     end
     level = parent
+    depth = depth + 1
   end
   return found_git and "git" or nil
 end

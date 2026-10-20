@@ -65,6 +65,10 @@ local BACKENDS = { auto = true, git = true, jj = true }
 
 local function validate(opts)
   check("ref", opts.ref, "string")
+  if opts.ref ~= nil and opts.ref:match("^%s*$") then
+    local msg = "lazydiff: option `ref` must be a non-empty string, got an empty string"
+    error(msg, 3)
+  end
   check("vcs", opts.vcs, "string")
   if opts.vcs ~= nil and not BACKENDS[opts.vcs] then
     local msg = ("lazydiff: option `vcs` must be one of auto, git, jj, got %s"):format(
