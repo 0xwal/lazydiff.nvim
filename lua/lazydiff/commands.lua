@@ -1,14 +1,15 @@
 local M = {}
 
 local function complete_refs(arglead)
-  local git = require("lazydiff.git")
-  local repo = git.repo_root(git.anchor_dir())
-  if not repo then
+  local vcs = require("lazydiff.vcs")
+  local dir = vcs.anchor_dir()
+  local backend, _, repo = vcs.get(dir)
+  if not backend then
     return {}
   end
   return vim.tbl_filter(function(ref)
     return ref:sub(1, #arglead) == arglead
-  end, git.refs(repo))
+  end, backend.refs(repo))
 end
 
 local function ref_arg(cmd)

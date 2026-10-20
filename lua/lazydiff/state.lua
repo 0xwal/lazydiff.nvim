@@ -1,15 +1,16 @@
 local M = {}
 
 local config = require("lazydiff.config")
-local git = require("lazydiff.git")
+local vcs = require("lazydiff.vcs")
+local path_util = require("lazydiff.path")
 local diff = require("lazydiff.diff")
 local render = require("lazydiff.render")
 local highlights = require("lazydiff.highlights")
 
 -- per-buffer state:
---   enabled, external, ref, repo, rel, git_dir, baseline (old lines), hunks,
---   saved_modifiable, signcolumn { win, value }, augroup, timer, watcher,
---   watch_timer
+--   enabled, external, ref, repo, rel, backend, state_dir, baseline (old
+--   lines), hunks, saved_modifiable, signcolumn { win, value }, augroup,
+--   timer, watcher, watch_timer
 local buffers = {}
 
 local function notify(msg, level)
@@ -38,35 +39,36 @@ local function buf_lines(bufnr)
   return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 end
 
--- Locate the buffer's file inside its repo. Returns { repo, rel } or nil + err.
+-- Locate the buffer's file inside its repo. Returns { repo, rel, backend } or
+-- nil + err.
 local function locate(bufnr)
   local path = buf_path(bufnr)
   if not path then
     return nil, "buffer has no file"
   end
-  local repo = git.repo_root(path)
-  if not repo then
-    return nil, "not in a git repository"
+  local backend, err, repo = vcs.get(path)
+  if not backend then
+    return nil, err or "not in a git or jj repository"
   end
-  local rel = git.relpath(repo, path)
+  local rel = path_util.relpath(repo, path)
   if not rel then
     return nil, "file is outside the repo root"
   end
-  return { repo = repo, rel = rel }
+  return { repo = repo, rel = rel, backend = backend }
 end
 
--- Fetch the reference blob. One git call: `git show` fails for untracked
--- paths, so the separate `cat-file -e` probe is unnecessary. Returns the
+-- Fetch the reference blob. One backend call: it fails for paths that are not
+-- in `ref`, so a separate tracked-ness probe is unnecessary. Returns the
 -- parsed old-lines array, or nil + an error string + a reason.
 local function fetch_baseline(loc, ref)
-  local blob, err, reason = git.head_blob(loc.repo, loc.rel, ref)
+  local blob, err, reason = loc.backend.file_at(loc.repo, loc.rel, ref)
   if not blob then
     return nil, err or "failed to read blob", reason
   end
-  if git.is_binary(blob) then
+  if path_util.is_binary(blob) then
     return nil, "binary file", "binary"
   end
-  return git.split_lines(blob)
+  return path_util.split_lines(blob)
 end
 
 local function recompute(bufnr, baseline)
@@ -88,11 +90,23 @@ end
 local function stop_watcher(state)
   close_timer(state.watch_timer)
   state.watch_timer = nil
+  state.watch_key = nil
   if state.watcher then
     pcall(state.watcher.stop, state.watcher)
     pcall(state.watcher.close, state.watcher)
     state.watcher = nil
   end
+end
+
+-- Identity of the current watch target. refresh() compares it against the
+-- installed watcher's key so a moved repo or a changed `vcs` option restarts
+-- the watcher, and a changed watch_names() does too.
+local function watch_key(state)
+  if not state.state_dir then
+    return nil
+  end
+  local names = state.backend and state.backend.watch_names() or {}
+  return state.state_dir .. "\0" .. table.concat(names, ",")
 end
 
 local function teardown_autocmds(state)
@@ -119,23 +133,32 @@ local function debounced_refresh(bufnr, state)
   )
 end
 
--- Watch the git directory so a commit, checkout or reset made behind the
--- editor's back refetches the baseline. HEAD and the index are written via
--- rename, so the directory (not the files) is what's observed.
-local WATCHED = { HEAD = true, index = true, ORIG_HEAD = true, ["packed-refs"] = true }
-
+-- Watch the backend's state directory so a commit, checkout or reset made
+-- behind the editor's back refetches the baseline. Both backends write their
+-- bookkeeping files via rename, so the directory (not the files) is what's
+-- observed, and each backend says which entry names mean "the baseline moved".
 local function start_watcher(bufnr, state)
   stop_watcher(state)
-  if not config.options.watch_git or not state.git_dir then
+  if not config.options.watch_git or not state.state_dir then
     return
+  end
+  local names = state.backend and state.backend.watch_names() or {}
+  if #names == 0 then
+    -- An empty list means nothing in the directory is worth reacting to, so
+    -- watching it would only accept every event for no reason.
+    return
+  end
+  local watched = {}
+  for _, name in ipairs(names) do
+    watched[name] = true
   end
   local ok, watcher = pcall(vim.uv.new_fs_event)
   if not ok or not watcher then
     return
   end
   state.watcher = watcher
-  local started = pcall(watcher.start, watcher, state.git_dir, {}, function(err, fname)
-    if err or (fname and not WATCHED[fname]) then
+  local started = pcall(watcher.start, watcher, state.state_dir, {}, function(err, fname)
+    if err or not fname or not watched[fname] then
       return
     end
     close_timer(state.watch_timer)
@@ -152,7 +175,9 @@ local function start_watcher(bufnr, state)
   end)
   if not started then
     stop_watcher(state)
+    return
   end
+  state.watch_key = watch_key(state)
 end
 
 local function setup_autocmds(bufnr, state)
@@ -254,9 +279,11 @@ function M.enable(bufnr, ref)
   state.enabled = true
   state.external = nil
   state.ref = ref
+  state.path = buf_path(bufnr)
   state.repo = loc.repo
   state.rel = loc.rel
-  state.git_dir = state.git_dir or git.git_dir(loc.repo)
+  state.backend = loc.backend
+  state.state_dir = loc.backend.state_dir(loc.repo)
   state.baseline = baseline
   state.hunks = hunks
   buffers[bufnr] = state
@@ -318,8 +345,9 @@ function M.toggle(bufnr, ref)
   end
 end
 
--- opts.baseline = true refetches the blob from git before recomputing, which
--- is what makes a commit or checkout under a live overlay show up.
+-- opts.baseline = true refetches the blob from the backend before
+-- recomputing, which is what makes a commit or checkout under a live overlay
+-- show up.
 function M.refresh(bufnr, opts)
   bufnr = resolve(bufnr)
   opts = opts or {}
@@ -332,10 +360,36 @@ function M.refresh(bufnr, opts)
     return
   end
 
-  if opts.baseline and not state.external then
-    local loc = locate(bufnr)
-    if loc then
-      local baseline, _, reason = fetch_baseline(loc, state.ref)
+  if not state.external then
+    local path = buf_path(bufnr)
+    local wanted = vcs.configured()
+    local forced_elsewhere =
+      wanted ~= nil and wanted ~= "auto" and wanted ~= (state.backend and state.backend.name)
+    local loc, moved
+    if opts.baseline or path ~= state.path or forced_elsewhere then
+      loc = locate(bufnr)
+      -- Remember the name even when it left the repo, so a plain refresh does
+      -- not re-run detection on every change. A baseline refresh locates anyway.
+      state.path = path
+      if loc then
+        moved = loc.repo ~= state.repo or loc.rel ~= state.rel or loc.backend ~= state.backend
+        state.repo = loc.repo
+        state.rel = loc.rel
+        state.backend = loc.backend
+        state.state_dir = loc.backend.state_dir(loc.repo)
+        if watch_key(state) ~= state.watch_key then
+          start_watcher(bufnr, state)
+        end
+      end
+    end
+
+    -- The old baseline belongs to the old repo, path or backend, so a moved
+    -- buffer refetches even when the caller did not ask for it.
+    if opts.baseline or moved then
+      -- locate() can fail after a :saveas out of the repo; the last known
+      -- location stays valid enough to refetch from.
+      local source = loc or { repo = state.repo, rel = state.rel, backend = state.backend }
+      local baseline, _, reason = fetch_baseline(source, state.ref)
       if baseline then
         state.baseline = baseline
       elseif reason == "untracked" then

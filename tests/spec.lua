@@ -46,7 +46,7 @@ local function configure(extra)
 end
 configure()
 
-local git = require("lazydiff.git")
+local git = require("lazydiff.vcs.git")
 local diff = require("lazydiff.diff")
 local render = require("lazydiff.render")
 local state = require("lazydiff.state")
@@ -720,6 +720,98 @@ check(
 section("health")
 
 check("checkhealth runs without throwing", pcall(require("lazydiff.health").check))
+
+-- ---------------------------------------------------------------------------
+section("vcs selection")
+
+local vcs = require("lazydiff.vcs")
+local jj = require("lazydiff.vcs.jj")
+local jjdir = fixture .. "/jjrepo"
+
+check("backends() lists git then jj", table.concat(vcs.backends(), ",") == "git,jj")
+local git_backend, git_err, git_root = vcs.get(dirty)
+check(
+  "a .git repo resolves to the git backend",
+  git_backend and git_backend.name == "git",
+  tostring(git_err)
+)
+check("the adapter reports the repo root", git_root == git.repo_root(dirty), tostring(git_root))
+check("no marker means no backend", select(1, vcs.get("/nonexistent-dir-xyz")) == nil)
+check("config rejects an unknown vcs", not pcall(require("lazydiff.config").setup, { vcs = "hg" }))
+check("config accepts vcs = jj", pcall(require("lazydiff.config").setup, { vcs = "jj" }))
+configure({ vcs = "git" })
+local forced = vcs.get(dirty)
+check("vcs = git still resolves a git repo", forced and forced.name == "git")
+configure()
+
+-- ---------------------------------------------------------------------------
+section("jj backend")
+
+if vim.fn.executable("jj") == 0 or vim.fn.isdirectory(jjdir .. "/.jj") ~= 1 then
+  print("  skip jj backend (no jj binary or no fixture)")
+else
+  local backend, jerr, root = vcs.get(jjdir .. "/nested")
+  check("the .jj marker selects the jj backend", backend and backend.name == "jj", tostring(jerr))
+  check("detection walks up from a subdirectory", root == jj.root(jjdir), tostring(root))
+  local colocated = vim.uv.fs_stat(jjdir .. "/.git") ~= nil
+  check(
+    "jj wins over a colocated .git",
+    not colocated or (vcs.get(jjdir) or {}).name == "jj"
+  )
+
+  local state_dir = backend.state_dir(root)
+  check(
+    "state_dir() is the .jj/repo directory",
+    state_dir ~= nil and state_dir:sub(-#".jj/repo") == ".jj/repo",
+    tostring(state_dir)
+  )
+  check("watch_names() returns a list", type(backend.watch_names()) == "table")
+
+  local refs = backend.refs(root)
+  check("refs() starts at the working copy", refs[1] == "@", vim.inspect(refs))
+  check("refs() includes @-", vim.tbl_contains(refs, "@-"))
+  local unique = {}
+  for _, r in ipairs(refs) do
+    unique[r] = true
+  end
+  check("refs() has no duplicates", #vim.tbl_keys(unique) == #refs, vim.inspect(refs))
+
+  local files, cerr = backend.changed_files(root, "@")
+  local by_path = {}
+  for _, e in ipairs(files or {}) do
+    by_path[e.path] = e
+  end
+  check("changed_files() returns a list", type(files) == "table", tostring(cerr))
+  local function status_of(name)
+    local entry = by_path[name]
+    return entry and entry.status or nil
+  end
+  check("a modified file shows as M", status_of("modified.txt") == "M")
+  check("a deleted file shows as D", status_of("gone.txt") == "D")
+  check("a new file shows as A", status_of("new.txt") == "A")
+  check("jj files are never untracked", by_path["new.txt"] and not by_path["new.txt"].untracked)
+  check("line counts are not reported", by_path["new.txt"] and by_path["new.txt"].added == nil)
+  check("an unchanged file is absent", by_path["kept.txt"] == nil)
+
+  local blob, ferr = backend.file_at(root, "kept.txt", "@")
+  check("file_at() returns the content", blob == "one\ntwo\n", tostring(ferr))
+  check(
+    "a missing path is reported untracked",
+    select(3, backend.file_at(root, "nope.txt", "@")) == "untracked"
+  )
+  check(
+    "HEAD maps to @",
+    select(1, backend.file_at(root, "kept.txt", "HEAD")) == "one\ntwo\n"
+  )
+
+  vim.cmd.edit(jjdir .. "/modified.txt")
+  check("the inline overlay enables in a jj repo", require("lazydiff").enable())
+  local jstatus = require("lazydiff").status(0)
+  check("and finds the one added line", jstatus ~= nil and jstatus.hunks == 1, vim.inspect(jstatus))
+  require("lazydiff").disable()
+  vim.cmd("enew!")
+  vim.cmd.cd(dirty)
+end
 
 -- ---------------------------------------------------------------------------
 print(("\n== %d passed, %d failed =="):format(pass, fail))

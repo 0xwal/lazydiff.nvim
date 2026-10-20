@@ -2,6 +2,9 @@ local M = {}
 
 M.defaults = {
   ref = "HEAD",
+  -- Which backend to use: "auto" picks by the .jj/.git marker nearest the
+  -- buffer, "git" and "jj" force one and skip detection entirely.
+  vcs = "auto",
   signs = {
     add = "+", -- rendered in the sign column (max 2 cells)
     delete = "- ", -- prefix on virt_lines for deleted content
@@ -58,8 +61,17 @@ local function check(path, value, expected)
   end
 end
 
+local BACKENDS = { auto = true, git = true, jj = true }
+
 local function validate(opts)
   check("ref", opts.ref, "string")
+  check("vcs", opts.vcs, "string")
+  if opts.vcs ~= nil and not BACKENDS[opts.vcs] then
+    local msg = ("lazydiff: option `vcs` must be one of auto, git, jj, got %s"):format(
+      tostring(opts.vcs)
+    )
+    error(msg, 3)
+  end
   check("signs", opts.signs, "table")
   check("show_hunk_header", opts.show_hunk_header, "boolean")
   check("word_diff", opts.word_diff, "boolean")
@@ -84,10 +96,16 @@ local function validate(opts)
   end
 end
 
-function M.setup(opts)
-  opts = opts or {}
+-- Validate an options table without installing it. `:checkhealth` uses this
+-- so probing the configuration cannot mutate global state.
+function M.validate(opts)
   check("opts", opts, "table")
   validate(opts)
+end
+
+function M.setup(opts)
+  opts = opts or {}
+  M.validate(opts)
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts)
 end
 

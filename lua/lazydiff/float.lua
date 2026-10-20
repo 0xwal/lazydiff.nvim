@@ -1,14 +1,15 @@
 -- Float mode: a lazygit-style popup listing every uncommitted file, with the
 -- selected one rendered full-length using the same overlay as inline mode.
 --
--- The rendering pipeline is entirely reused -- git.head_blob for the baseline,
--- diff.compute for the hunks, render.render for the extmarks. This module only
--- owns the window shell, the file list, and the selection.
+-- The rendering pipeline is entirely reused -- backend.file_at for the
+-- baseline, diff.compute for the hunks, render.render for the extmarks. This
+-- module only owns the window shell, the file list, and the selection.
 
 local M = {}
 
 local config = require("lazydiff.config")
-local git = require("lazydiff.git")
+local vcs = require("lazydiff.vcs")
+local path_util = require("lazydiff.path")
 local diff = require("lazydiff.diff")
 local render = require("lazydiff.render")
 
@@ -139,8 +140,8 @@ local function baseline_for(entry)
   end
   local lines = {}
   if not entry.untracked then
-    local blob = git.head_blob(S.repo, key, S.ref)
-    lines = blob and git.split_lines(blob) or {}
+    local blob = S.backend.file_at(S.repo, key, S.ref)
+    lines = blob and path_util.split_lines(blob) or {}
   end
   S.baselines[key] = lines
   return lines
@@ -249,9 +250,10 @@ end
 local function build_row(entry, width)
   local letter = (entry.status or "M"):sub(1, 1)
   local prefix = " " .. letter .. " "
-  local adds = entry.binary and "" or ("+" .. entry.added)
-  local dels = entry.binary and "" or ("-" .. entry.deleted)
-  local counts = entry.binary and "binary" or (adds .. " " .. dels)
+  local counted = not entry.binary and entry.added ~= nil and entry.deleted ~= nil
+  local adds = counted and ("+" .. entry.added) or ""
+  local dels = counted and ("-" .. entry.deleted) or ""
+  local counts = entry.binary and "binary" or (counted and (adds .. " " .. dels) or "")
 
   local budget = width - #prefix - vim.fn.strdisplaywidth(counts) - 2
   local path = fit_path(entry.path, budget)
@@ -266,8 +268,8 @@ local function build_row(entry, width)
       status = { 1, 2 },
       path = { #prefix, #prefix + #path },
       binary = entry.binary and { counts_start, #line } or nil,
-      adds = (not entry.binary) and { counts_start, counts_start + #adds } or nil,
-      dels = (not entry.binary) and { counts_start + #adds + 1, #line } or nil,
+      adds = counted and { counts_start, counts_start + #adds } or nil,
+      dels = counted and { counts_start + #adds + 1, #line } or nil,
     }
 end
 
@@ -585,7 +587,7 @@ function M.refresh()
   local current = S.files[S.index]
   local keep = current and current.path
 
-  local files, err = git.changed_files(S.repo, S.ref)
+  local files, err = S.backend.changed_files(S.repo, S.ref)
   if not files then
     notify(err or "failed to list changes", vim.log.levels.ERROR)
     return
@@ -666,13 +668,14 @@ function M.open(opts)
     M.close()
   end
 
-  local repo = git.repo_root(git.anchor_dir())
-  if not repo then
-    notify("not in a git repository", vim.log.levels.WARN)
+  local dir = vcs.anchor_dir()
+  local backend, verr, repo = vcs.get(dir)
+  if not backend then
+    notify(verr or "not in a git or jj repository", vim.log.levels.WARN)
     return
   end
 
-  local files, err = git.changed_files(repo, ref)
+  local files, err = backend.changed_files(repo, ref)
   if not files then
     notify(err or "failed to list changes", vim.log.levels.ERROR)
     return
@@ -684,6 +687,7 @@ function M.open(opts)
 
   S = {
     repo = repo,
+    backend = backend,
     ref = ref,
     files = files,
     baselines = {},

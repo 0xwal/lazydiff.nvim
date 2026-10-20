@@ -85,6 +85,30 @@ printf 'local M = {}\nfunction M.new() return 42 end\nreturn M\n' >"$d/brand-new
 head -c 2048 /dev/urandom >"$d/new.bin"             # ?  untracked binary
 # unchanged.lua is deliberately left alone -- it must NOT appear in the list.
 
+# --- jj repo -----------------------------------------------------------------
+# Only built when jj is on $PATH; the spec skips the jj section otherwise.
+j="$root/jjrepo"
+if command -v jj >/dev/null 2>&1; then
+  mkdir -p "$j"
+  (
+    cd "$j"
+    # --colocate leaves a .git next to .jj, which is also what the marker
+    # precedence test needs; older jj releases lack the flag, so fall back.
+    jj git init --colocate >/dev/null 2>&1 || jj git init >/dev/null 2>&1
+    jj config set --repo user.name "lazydiff tests"
+    jj config set --repo user.email test@example.com
+    printf 'one\ntwo\n' >kept.txt
+    printf 'one\ntwo\n' >modified.txt
+    printf 'one\ntwo\n' >gone.txt
+    mkdir -p nested
+    jj commit -m "fixture baseline" >/dev/null
+    printf 'one\ntwo\nthree\n' >modified.txt # M
+    rm gone.txt                              # D
+    printf 'brand new\n' >new.txt            # A (jj tracks everything)
+    jj st >/dev/null                         # force a snapshot
+  )
+fi
+
 # --- clean repo -------------------------------------------------------------
 c="$root/clean"
 init_repo "$c"

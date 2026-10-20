@@ -1,4 +1,8 @@
+local path = require("lazydiff.path")
+
 local M = {}
+
+M.name = "git"
 
 -- Untracked files above this size are listed but not line-counted.
 local MAX_COUNT_BYTES = 4 * 1024 * 1024
@@ -23,14 +27,16 @@ local function trim(s)
   return (s:gsub("%s+$", ""))
 end
 
--- Accepts a file path or a directory. Passing a directory used to strip it to
--- its parent via dirname(), so repo_root("/path/to/repo") returned nil.
-function M.repo_root(path)
-  if not path or path == "" then
+-- Accepts a file path or a directory. The directory case is what lets
+-- vcs.get() hand a buffer path straight through: passing a directory used to
+-- strip it to its parent via dirname(), so repo_root("/path/to/repo")
+-- returned nil.
+function M.root(dir)
+  if not dir or dir == "" then
     return nil
   end
-  local dir = vim.fn.isdirectory(path) == 1 and path or vim.fs.dirname(path)
-  local code, out = run(dir, { "rev-parse", "--show-toplevel" })
+  local cwd = vim.fn.isdirectory(dir) == 1 and dir or vim.fs.dirname(dir)
+  local code, out = run(cwd, { "rev-parse", "--show-toplevel" })
   if code ~= 0 then
     return nil
   end
@@ -41,11 +47,21 @@ function M.repo_root(path)
   return out
 end
 
--- Absolute path of the repository's git directory. This is where HEAD and the
--- index live, so it is what the baseline watcher observes. Worktrees keep a
--- `.git` *file* at the root, which is why this asks git instead of guessing.
-function M.git_dir(repo_root)
-  local code, out = run(repo_root, { "rev-parse", "--absolute-git-dir" })
+-- Absolute path of the repository's git directory. A linked worktree keeps its
+-- own `.git/worktrees/<n>` directory, but the refs live in the common
+-- directory, so that is what the watcher has to observe to see branch moves.
+function M.state_dir(root)
+  local code, out = run(root, { "rev-parse", "--path-format=absolute", "--git-common-dir" })
+  if code == 0 then
+    local common = trim(out)
+    if common ~= "" then
+      if common:sub(1, 1) == "/" then
+        return common
+      end
+      return root .. "/" .. common
+    end
+  end
+  code, out = run(root, { "rev-parse", "--absolute-git-dir" })
   if code ~= 0 then
     return nil
   end
@@ -53,25 +69,10 @@ function M.git_dir(repo_root)
   return out ~= "" and out or nil
 end
 
--- Directory to resolve the repo from. The current buffer's name is only
--- trusted when its parent directory actually exists: plugin buffers name
--- themselves with things shaped like paths -- oil://, term://, fugitive:// --
--- and dirname() on those yields a directory that isn't there.
-function M.anchor_dir()
-  local name = vim.api.nvim_buf_get_name(0)
-  if name ~= "" then
-    local dir = vim.fs.dirname(name)
-    if dir and vim.fn.isdirectory(dir) == 1 then
-      return dir
-    end
-  end
-  return vim.fn.getcwd()
-end
-
 -- Branch and tag names plus HEAD, for command completion.
-function M.refs(repo_root)
+function M.refs(root)
   local list = { "HEAD" }
-  local code, out = run(repo_root, { "for-each-ref", "--format=%(refname:short)" })
+  local code, out = run(root, { "for-each-ref", "--format=%(refname:short)" })
   if code ~= 0 then
     return list
   end
@@ -81,43 +82,38 @@ function M.refs(repo_root)
   return list
 end
 
-function M.relpath(repo_root, abspath)
-  if not repo_root or not abspath then
-    return nil
-  end
-  local prefix = repo_root:gsub("/+$", "") .. "/"
-  if abspath:sub(1, #prefix) ~= prefix then
-    return nil
-  end
-  return abspath:sub(#prefix + 1)
+-- Directory entries the watcher treats as "the baseline may have moved". HEAD
+-- and the index are written via rename, so observing the directory is enough.
+function M.watch_names()
+  return { "HEAD", "index", "ORIG_HEAD", "packed-refs" }
 end
 
-function M.is_tracked(repo_root, relpath, ref)
+function M.is_tracked(root, relpath, ref)
   ref = ref or "HEAD"
-  local code = run(repo_root, { "cat-file", "-e", ref .. ":" .. relpath })
+  local code = run(root, { "cat-file", "-e", ref .. ":" .. relpath })
   return code == 0
+end
+
+-- A bad ref makes every cat-file probe fail, so a missing path can only be
+-- called untracked once the ref itself is known to resolve.
+local function ref_exists(root, ref)
+  return run(root, { "rev-parse", "--verify", "--quiet", ref .. "^{commit}" }) == 0
 end
 
 -- Returns the blob content, or nil + a message + a reason. `reason` is
 -- "untracked" when the path simply doesn't exist at `ref`, so callers can
--- treat that as "everything is new" rather than as an error.
-function M.head_blob(repo_root, relpath, ref)
+-- treat that as "everything is new" rather than as an error. The decision is
+-- a probe, not a match on git's English stderr.
+function M.file_at(root, relpath, ref)
   ref = ref or "HEAD"
-  local code, out, err = run(repo_root, { "show", ref .. ":" .. relpath })
-  if code ~= 0 then
-    if err:find("does not exist", 1, true) or err:find("exists on disk, but not in", 1, true) then
-      return nil, "file is not tracked at " .. ref, "untracked"
-    end
-    return nil, trim(err), "error"
+  local code, out, err = run(root, { "show", ref .. ":" .. relpath })
+  if code == 0 then
+    return out, nil
   end
-  return out, nil
-end
-
-function M.is_binary(content)
-  if not content or content == "" then
-    return false
+  if ref_exists(root, ref) and not M.is_tracked(root, relpath, ref) then
+    return nil, "file is not tracked at " .. ref, "untracked"
   end
-  return content:sub(1, 8000):find("\0", 1, true) ~= nil
+  return nil, trim(err), "error"
 end
 
 -- Split git's -z output into records. -z is used throughout changed_files so
@@ -148,9 +144,9 @@ local function parse_name_status(out, upsert)
       end
       i = i + 3
     else
-      local path = toks[i + 1]
-      if path then
-        upsert(path).status = letter
+      local path_at = toks[i + 1]
+      if path_at then
+        upsert(path_at).status = letter
       end
       i = i + 2
     end
@@ -165,17 +161,17 @@ local function parse_numstat(out, files)
   local toks = nul_tokens(out)
   local i = 1
   while i <= #toks do
-    local added, deleted, path = (toks[i] or ""):match("^(%S+)\t(%S+)\t(.*)$")
+    local added, deleted, path_at = (toks[i] or ""):match("^(%S+)\t(%S+)\t(.*)$")
     if not added then
       i = i + 1
     else
-      if path == "" then
-        path = toks[i + 2]
+      if path_at == "" then
+        path_at = toks[i + 2]
         i = i + 3
       else
         i = i + 1
       end
-      local entry = path and files[path]
+      local entry = path_at and files[path_at]
       if entry then
         entry.binary = added == "-"
         entry.added = tonumber(added) or 0
@@ -198,7 +194,7 @@ local function inspect_untracked(abspath)
     return 0, false
   end
   local head = f:read(8000) or ""
-  if M.is_binary(head) then
+  if path.is_binary(head) then
     f:close()
     return 0, true
   end
@@ -222,46 +218,49 @@ end
 -- Returns an array sorted by path:
 --   { path, status, added, deleted, binary, untracked, old_path }
 -- `status` is git's letter: M A D R C, or "?" for untracked.
-function M.changed_files(repo_root, ref)
+function M.changed_files(root, ref)
   ref = ref or "HEAD"
   local files, order = {}, {}
 
-  local function upsert(path)
-    local entry = files[path]
+  local function upsert(file_path)
+    local entry = files[file_path]
     if not entry then
-      entry = { path = path, status = "M", added = 0, deleted = 0, binary = false }
-      files[path] = entry
-      order[#order + 1] = path
+      -- added/deleted stay nil until numstat reports them, so a failed numstat
+      -- leaves the sidebar blank instead of claiming +0 -0.
+      entry = { path = file_path, status = "M", binary = false }
+      files[file_path] = entry
+      order[#order + 1] = file_path
     end
     return entry
   end
 
-  local code, out, err = run(repo_root, { "diff", ref, "--name-status", "-z", "--" })
+  local code, out, err = run(root, { "diff", ref, "--name-status", "-z", "--" })
   if code ~= 0 then
     return nil, err ~= "" and trim(err) or ("git diff failed against " .. ref)
   end
   parse_name_status(out, upsert)
 
-  local ncode, nout = run(repo_root, { "diff", ref, "--numstat", "-z", "--" })
+  local ncode, nout = run(root, { "diff", ref, "--numstat", "-z", "--" })
   if ncode == 0 then
     parse_numstat(nout, files)
   end
 
-  local ucode, uout = run(repo_root, { "ls-files", "--others", "--exclude-standard", "-z" })
+  local ucode, uout = run(root, { "ls-files", "--others", "--exclude-standard", "-z" })
   if ucode == 0 then
-    for _, path in ipairs(nul_tokens(uout)) do
-      if path ~= "" and not files[path] then
-        local entry = upsert(path)
+    for _, file_path in ipairs(nul_tokens(uout)) do
+      if file_path ~= "" and not files[file_path] then
+        local entry = upsert(file_path)
         entry.status = "?"
         entry.untracked = true
-        entry.added, entry.binary = inspect_untracked(repo_root .. "/" .. path)
+        entry.added, entry.binary = inspect_untracked(root .. "/" .. file_path)
+        entry.deleted = 0
       end
     end
   end
 
   local list = {}
-  for _, path in ipairs(order) do
-    list[#list + 1] = files[path]
+  for _, file_path in ipairs(order) do
+    list[#list + 1] = files[file_path]
   end
   table.sort(list, function(a, b)
     return a.path < b.path
@@ -269,16 +268,14 @@ function M.changed_files(repo_root, ref)
   return list
 end
 
-function M.split_lines(content)
-  if not content or content == "" then
-    return {}
-  end
-  local trailing_newline = content:sub(-1) == "\n"
-  local lines = vim.split(content, "\n", { plain = true })
-  if trailing_newline then
-    lines[#lines] = nil
-  end
-  return lines
-end
+-- The names below predate the VCS seam. vcs.get() returns this module as the
+-- git adapter, and these aliases keep the old call sites (and the spec) on the
+-- same function names.
+M.repo_root = M.root
+M.git_dir = M.state_dir
+M.head_blob = M.file_at
+M.is_binary = path.is_binary
+M.split_lines = path.split_lines
+M.relpath = path.relpath
 
 return M

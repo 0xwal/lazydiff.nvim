@@ -184,6 +184,7 @@ sections = { lualine_x = { function() return require("lazydiff").statusline() en
 ```lua
 require("lazydiff").setup({
   ref = "HEAD",                  -- ref to diff the working tree against
+  vcs = "auto",                  -- "auto" (detect by .jj/.git), "git" or "jj"
   signs = {
     add = "+",                   -- sign-column marker on added lines (max 2 cells)
     delete = "- ",               -- prefix on virt_lines for deleted content
