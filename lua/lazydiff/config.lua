@@ -15,6 +15,7 @@ M.defaults = {
   -- hunk_header.
   highlights = {},
   show_hunk_header = true,
+  show_author_header = false, -- append the ref's author name to the hunk header line
   word_diff = true, -- highlight the changed words inside change hunks
   read_only = false,
   auto_refresh = true,
@@ -109,6 +110,7 @@ local function validate(opts)
     end
   end
   check("show_hunk_header", opts.show_hunk_header, "boolean")
+  check("show_author_header", opts.show_author_header, "boolean")
   check("word_diff", opts.word_diff, "boolean")
   check("read_only", opts.read_only, "boolean")
   check("auto_refresh", opts.auto_refresh, "boolean")

@@ -109,6 +109,21 @@ function M.refs(root)
   return list
 end
 
+-- Author name of the change at `ref`, or nil on failure.
+function M.author(root, ref)
+  ref = resolve_ref(ref)
+  local code, out = run(root, { "log", "-r", ref, "--no-graph", "-T", "author.name()" })
+  if code ~= 0 then
+    return nil
+  end
+  local name = lines_of(out)[1]
+  if not name then
+    return nil
+  end
+  name = trim(name)
+  return name ~= "" and name or nil
+end
+
 -- Tracked-path sets, keyed by root and ref. A failed `file show` asks whether
 -- the path is tracked at all; without a cache that is a full `jj file list`
 -- scan each time. Entries expire after a few seconds, and an op change makes

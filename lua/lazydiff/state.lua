@@ -71,6 +71,13 @@ local function fetch_baseline(loc, ref)
   return path_util.split_lines(blob)
 end
 
+local function author_for(st, ref)
+  if not config.options.show_author_header or not st.backend or not st.repo then
+    return nil
+  end
+  return st.backend.author(st.repo, ref)
+end
+
 local function recompute(bufnr, baseline)
   return diff.compute(baseline, buf_lines(bufnr))
 end
@@ -297,7 +304,7 @@ function M.enable(bufnr, ref)
   state.hunks = hunks
   buffers[bufnr] = state
 
-  render.render(bufnr, hunks, state.baseline_lines)
+  render.render(bufnr, hunks, state.baseline_lines, author_for(state, ref))
 
   if config.options.read_only then
     vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
@@ -423,7 +430,7 @@ function M.refresh(bufnr, opts)
 
   local hunks = recompute(bufnr, state.baseline)
   state.hunks = hunks
-  render.render(bufnr, hunks, state.baseline_lines)
+  render.render(bufnr, hunks, state.baseline_lines, author_for(state, state.ref))
 end
 
 -- Register hunks computed elsewhere (the float's scratch pane) so nav.lua can

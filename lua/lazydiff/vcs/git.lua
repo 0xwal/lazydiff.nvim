@@ -82,6 +82,16 @@ function M.refs(root)
   return list
 end
 
+-- Author name of the commit at `ref`, or nil on failure.
+function M.author(root, ref)
+  local code, out = run(root, { "log", "-1", "--format=%an", ref or "HEAD" })
+  if code ~= 0 then
+    return nil
+  end
+  local name = trim(out)
+  return name ~= "" and name or nil
+end
+
 -- Directory entries the watcher treats as "the baseline may have moved". HEAD
 -- and the index are written via rename, so observing the directory is enough.
 function M.watch_names()

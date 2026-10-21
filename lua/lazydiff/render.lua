@@ -208,10 +208,15 @@ end
 
 -- segs is keyed by baseline row (1-based). Deleted rows are
 -- hunk.old_start .. hunk.old_start + hunk.old_count - 1.
-local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_ranges, segs)
+local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_ranges, segs, author)
   local lines = {}
   if show_header then
-    lines[#lines + 1] = { { diff_mod.format_hunk_header(hunk), "LazydiffHunkHeader" } }
+    local header = { diff_mod.format_hunk_header(hunk), "LazydiffHunkHeader" }
+    local chunks = { header }
+    if config.options.show_author_header and author then
+      chunks[#chunks + 1] = { "  author: " .. author, "LazydiffHunkHeader" }
+    end
+    lines[#lines + 1] = chunks
   end
   for i, content in ipairs(hunk.old_lines) do
     local row = hunk.old_start + i - 1
@@ -264,7 +269,7 @@ end
 
 -- baseline_lines: full baseline file lines. Nil (e.g. scratch float) falls
 -- back to plain LazydiffDelete for deleted lines.
-function M.render(bufnr, hunks, baseline_lines)
+function M.render(bufnr, hunks, baseline_lines, author)
   M.clear(bufnr)
   if not hunks or #hunks == 0 then
     return
@@ -283,7 +288,7 @@ function M.render(bufnr, hunks, baseline_lines)
 
   for _, hunk in ipairs(hunks) do
     local old_words, new_words = word_ranges(hunk)
-    local above_lines = build_above_virt_lines(bufnr, hunk, signs, show_header, old_words, segs)
+    local above_lines = build_above_virt_lines(bufnr, hunk, signs, show_header, old_words, segs, author)
 
     if hunk.new_count > 0 then
       -- Hunk has buffer-anchored content: place header+deletes ABOVE the first new line.
