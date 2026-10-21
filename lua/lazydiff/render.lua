@@ -46,9 +46,12 @@ local function syntax_segments(text_lines, filetype)
     if not query then
       return nil
     end
-    local out = {}
-    for id, node in query:iter_captures(tree:root(), text, 0, -1) do
+    local pending = {}
+    local order = 0
+    for id, node, metadata in query:iter_captures(tree:root(), text, 0, -1) do
       local name = query.captures[id]
+      local meta = metadata and metadata[id]
+      local priority = (meta and meta.priority) or 100
       local sr, sc, er, ec = node:range()
       for row = sr, er do
         local line = text_lines[row + 1]
@@ -56,11 +59,52 @@ local function syntax_segments(text_lines, filetype)
           local cs = row == sr and sc or 0
           local ce = row == er and ec or #line
           if ce > cs then
-            out[row + 1] = out[row + 1] or {}
-            table.insert(out[row + 1], { cs, ce, name })
+            order = order + 1
+            pending[row + 1] = pending[row + 1] or {}
+            table.insert(pending[row + 1], {
+              cs = cs,
+              ce = ce,
+              name = name,
+              priority = priority,
+              order = order,
+            })
           end
         end
       end
+    end
+    local out = {}
+    for row, caps in pairs(pending) do
+      table.sort(caps, function(a, b)
+        if a.priority ~= b.priority then
+          return a.priority < b.priority
+        end
+        local la, lb = a.ce - a.cs, b.ce - b.cs
+        if la ~= lb then
+          return la > lb
+        end
+        return a.order < b.order
+      end)
+      local line_len = #text_lines[row]
+      local cols = {}
+      for _, cap in ipairs(caps) do
+        for c = cap.cs + 1, cap.ce do
+          cols[c] = cap.name
+        end
+      end
+      local spans = {}
+      local c = 1
+      while c <= line_len do
+        local name = cols[c]
+        local j = c
+        while j < line_len and cols[j + 1] == name do
+          j = j + 1
+        end
+        if name then
+          table.insert(spans, { c - 1, j, name })
+        end
+        c = j + 1
+      end
+      out[row] = spans
     end
     return out
   end)
