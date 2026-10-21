@@ -28,31 +28,118 @@ local function word_ranges(hunk)
   return olds, news
 end
 
--- A deleted line as virt_text chunks: the sign, then the content split into
--- plain and emphasised spans.
-local function delete_chunks(content, ranges, sign)
-  local chunks = { { sign, "LazydiffDeleteSign" } }
-  local pos = 0
-  for _, r in ipairs(ranges or {}) do
-    if r[1] > pos then
-      chunks[#chunks + 1] = { content:sub(pos + 1, r[1]), "LazydiffDelete" }
+-- Treesitter captures per line index: segs[i] = list of { col_start, col_end, capture_name }.
+-- Returns nil when no parser or query exists, or on any error.
+local function syntax_segments(text_lines, filetype)
+  local ok, result = pcall(function()
+    if not filetype or filetype == "" then
+      return nil
     end
-    chunks[#chunks + 1] = { content:sub(r[1] + 1, r[2]), "LazydiffDeleteWord" }
-    pos = r[2]
+    local lang = vim.treesitter.language.get_lang(filetype)
+    if not lang then
+      return nil
+    end
+    local text = table.concat(text_lines, "\n")
+    local parser = vim.treesitter.get_string_parser(text, lang)
+    local tree = parser:parse()[1]
+    local query = vim.treesitter.query.get(lang, "highlights")
+    if not query then
+      return nil
+    end
+    local out = {}
+    for id, node in query:iter_captures(tree:root(), text, 0, -1) do
+      local name = query.captures[id]
+      local sr, sc, er, ec = node:range()
+      for row = sr, er do
+        local line = text_lines[row + 1]
+        if line then
+          local cs = row == sr and sc or 0
+          local ce = row == er and ec or #line
+          if ce > cs then
+            out[row + 1] = out[row + 1] or {}
+            table.insert(out[row + 1], { cs, ce, name })
+          end
+        end
+      end
+    end
+    return out
+  end)
+  if ok then
+    return result
   end
-  if pos < #content then
-    chunks[#chunks + 1] = { content:sub(pos + 1), "LazydiffDelete" }
+  return nil
+end
+
+local syn_groups = {}
+
+-- Highlight group for a treesitter capture: syntax fg on the LazydiffDelete bg.
+-- Falls back to LazydiffDelete when the capture has no fg.
+local function delete_hl_for(capture_name)
+  local safe = capture_name:gsub("[^%w_]", "_")
+  if syn_groups[safe] ~= nil then
+    return syn_groups[safe]
+  end
+  local fg = vim.api.nvim_get_hl(0, { name = "@" .. capture_name, link = false }).fg
+  if not fg then
+    syn_groups[safe] = "LazydiffDelete"
+    return "LazydiffDelete"
+  end
+  local bg = vim.api.nvim_get_hl(0, { name = "LazydiffDelete", link = false }).bg
+  local name = "LazydiffDeleteSyn_" .. safe
+  vim.api.nvim_set_hl(0, name, { fg = fg, bg = bg, default = true })
+  syn_groups[safe] = name
+  return name
+end
+
+-- A deleted line as virt_text chunks: the sign, then the content split into
+-- syntax spans. Word ranges take priority over syntax spans.
+local function delete_chunks(content, ranges, sign, segs)
+  local chunks = { { sign, "LazydiffDeleteSign" } }
+  local len = #content
+  local groups = {}
+  for c = 1, len do
+    groups[c] = "LazydiffDelete"
+  end
+  for _, s in ipairs(segs or {}) do
+    local g = delete_hl_for(s[3])
+    for c = s[1] + 1, math.min(s[2], len) do
+      groups[c] = g
+    end
+  end
+  for _, r in ipairs(ranges or {}) do
+    for c = r[1] + 1, math.min(r[2], len) do
+      groups[c] = "LazydiffDeleteWord"
+    end
+  end
+  local i = 1
+  while i <= len do
+    local g = groups[i]
+    local j = i
+    while j < len and groups[j + 1] == g do
+      j = j + 1
+    end
+    chunks[#chunks + 1] = { content:sub(i, j), g }
+    i = j + 1
   end
   return chunks
 end
 
-local function build_above_virt_lines(hunk, signs, show_header, old_word_ranges)
+local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_ranges)
   local lines = {}
   if show_header then
     lines[#lines + 1] = { { diff_mod.format_hunk_header(hunk), "LazydiffHunkHeader" } }
   end
+  local segs
+  if hunk.old_lines and #hunk.old_lines > 0 then
+    segs = syntax_segments(hunk.old_lines, vim.bo[bufnr].filetype)
+  end
   for i, content in ipairs(hunk.old_lines) do
-    lines[#lines + 1] = delete_chunks(content, old_word_ranges and old_word_ranges[i], signs.delete)
+    lines[#lines + 1] = delete_chunks(
+      content,
+      old_word_ranges and old_word_ranges[i],
+      signs.delete,
+      segs and segs[i]
+    )
   end
   return lines
 end
@@ -107,7 +194,7 @@ function M.render(bufnr, hunks)
 
   for _, hunk in ipairs(hunks) do
     local old_words, new_words = word_ranges(hunk)
-    local above_lines = build_above_virt_lines(hunk, signs, show_header, old_words)
+    local above_lines = build_above_virt_lines(bufnr, hunk, signs, show_header, old_words)
 
     if hunk.new_count > 0 then
       -- Hunk has buffer-anchored content: place header+deletes ABOVE the first new line.
