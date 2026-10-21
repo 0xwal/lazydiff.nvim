@@ -1,32 +1,96 @@
 local M = {}
 
-local fallbacks = {
-  add = 0xa6e3a1,
-  delete = 0xf38ba8,
-  change = 0xf9e2af,
-  header = 0xcba6f7,
-  dim = 0x6c7086,
-}
+local config = require("lazydiff.config")
+
+-- Colour values reach the blend maths as numbers. Accept an integer, a
+-- "#rrggbb" string, or "NONE" (which means "unset").
+local function to_color(value)
+  if type(value) == "number" then
+    return value
+  end
+  if type(value) == "string" then
+    local hex = value:match("^#(%x%x%x%x%x%x)$")
+    if hex then
+      return tonumber(hex, 16)
+    end
+  end
+  return nil
+end
+
+local function normalize(attrs)
+  attrs.fg = to_color(attrs.fg)
+  attrs.bg = to_color(attrs.bg)
+  return attrs
+end
 
 local function source_hl(name)
   local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
   if ok and hl then
-    return hl
+    return normalize(hl)
   end
   return {}
 end
 
--- First non-nil fg across `names`, else `fallback`. The diff-oriented groups
+-- Walk an unresolved link chain up to 8 hops and return the final attributes
+-- table with the `link` key removed.
+local function follow_link(attrs)
+  for _ = 1, 8 do
+    if not attrs or not attrs.link then
+      break
+    end
+    local ok, next_hl = pcall(vim.api.nvim_get_hl, 0, { name = attrs.link, link = false })
+    if not ok or not next_hl then
+      break
+    end
+    attrs = next_hl
+  end
+  if not attrs then
+    return {}
+  end
+  attrs.link = nil
+  return normalize(attrs)
+end
+
+-- Default group per slot; only the add/delete pair exists as a distinction.
+local DEFAULT_SLOT_GROUP = {
+  add = "DiffAdd",
+  add_word = "DiffAdd",
+  add_sign = "DiffAdd",
+  delete = "DiffDelete",
+  delete_word = "DiffDelete",
+  delete_sign = "DiffDelete",
+}
+
+-- Attributes for one overlay slot, from the configured source or the default.
+local function source(slot)
+  local spec = (config.options.highlights or {})[slot]
+  if type(spec) == "table" then
+    local copy = vim.deepcopy(spec)
+    copy.fg = to_color(copy.fg)
+    copy.bg = to_color(copy.bg)
+    return copy
+  end
+  if type(spec) ~= "string" then
+    spec = DEFAULT_SLOT_GROUP[slot]
+  end
+  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = spec, link = false })
+  if not ok or not hl then
+    return {}
+  end
+  return follow_link(normalize(hl))
+end
+
+-- First non-nil fg across `names`, else nil. The diff-oriented groups
 -- (DiffAdd etc.) are frequently bg-only, so the float's status letters and
 -- counts -- which are fg-only text -- source from Added/Removed/Changed first.
-local function first_fg(names, fallback)
+local function first_fg(names)
   for _, name in ipairs(names) do
     local hl = source_hl(name)
     if hl.fg then
       return hl.fg
     end
   end
-  return fallback
+  return nil
 end
 
 -- First non-nil bg across `names`, else nil.
@@ -52,8 +116,12 @@ local function blend(color, target, amount)
 end
 
 local function apply()
-  local da = source_hl("DiffAdd")
-  local dd = source_hl("DiffDelete")
+  local da = source("add")
+  local dd = source("delete")
+  local dw = source("add_word")
+  local ddw = source("delete_word")
+  local ds = source("add_sign")
+  local dds = source("delete_sign")
   local fn = source_hl("Function")
   local nm = source_hl("Normal")
   local toward = nm.fg or 0xffffff
@@ -74,42 +142,41 @@ local function apply()
   -- so they still stand out on fg-only schemes.
   local groups = {
     LazydiffAdd = { bg = da.bg, default = true },
-    LazydiffDelete = { fg = dd.fg or fallbacks.delete, bg = dd.bg, default = true },
-    LazydiffAddSign = { fg = da.fg or fallbacks.add, bg = nm.bg, bold = true, default = true },
-    LazydiffDeleteSign = { fg = dd.fg or fallbacks.delete, bg = nm.bg, bold = true, default = true },
-    LazydiffHunkHeader = { fg = fn.fg or fallbacks.header, default = true },
+    LazydiffDelete = { bg = dd.bg, default = true },
+    LazydiffAddSign = { fg = ds.fg or da.fg, bg = nm.bg, bold = true, default = true },
+    LazydiffDeleteSign = { fg = dds.fg or dd.fg, bg = nm.bg, bold = true, default = true },
+    LazydiffHunkHeader = { fg = fn.fg, default = true },
     LazydiffAddWord = {
-      bg = da.bg and blend(da.bg, toward, 0.2) or nil,
+      bg = (dw.bg or da.bg) and blend(dw.bg or da.bg, toward, 0.2) or nil,
       bold = true,
-      underline = da.bg == nil,
+      underline = (dw.bg or da.bg) == nil,
       default = true,
     },
     LazydiffDeleteWord = {
-      fg = dd.fg or fallbacks.delete,
-      bg = dd.bg and blend(dd.bg, toward, 0.2) or nil,
+      bg = (ddw.bg or dd.bg) and blend(ddw.bg or dd.bg, toward, 0.2) or nil,
       bold = true,
-      underline = dd.bg == nil,
+      underline = (ddw.bg or dd.bg) == nil,
       default = true,
     },
   }
 
   -- Float mode. Status letters and counts are fg-only text in the sidebar, so
   -- they source from the fg-carrying groups first (see first_fg).
-  local add_fg = first_fg({ "Added", "GitSignsAdd", "DiffAdd" }, fallbacks.add)
-  local del_fg = first_fg({ "Removed", "GitSignsDelete", "DiffDelete" }, fallbacks.delete)
-  local chg_fg = first_fg({ "Changed", "GitSignsChange", "DiffChange" }, fallbacks.change)
-  local dim_fg = first_fg({ "Comment", "NonText" }, fallbacks.dim)
+  local add_fg = first_fg({ "Added", "GitSignsAdd", "DiffAdd" })
+  local del_fg = first_fg({ "Removed", "GitSignsDelete", "DiffDelete" })
+  local chg_fg = first_fg({ "Changed", "GitSignsChange", "DiffChange" })
+  local dim_fg = first_fg({ "Comment", "NonText" })
 
   groups.LazydiffStatusModified = { fg = chg_fg, default = true }
   groups.LazydiffStatusAdded = { fg = add_fg, default = true }
   groups.LazydiffStatusDeleted = { fg = del_fg, default = true }
-  groups.LazydiffStatusRenamed = { fg = fn.fg or fallbacks.header, default = true }
+  groups.LazydiffStatusRenamed = { fg = fn.fg, default = true }
   groups.LazydiffStatusUntracked = { fg = dim_fg, default = true }
   groups.LazydiffCountAdd = { fg = add_fg, default = true }
   groups.LazydiffCountDelete = { fg = del_fg, default = true }
   groups.LazydiffFloatPath = { fg = nm.fg, default = true }
   groups.LazydiffFloatDim = { fg = dim_fg, default = true }
-  groups.LazydiffFloatTitle = { fg = fn.fg or fallbacks.header, bold = true, default = true }
+  groups.LazydiffFloatTitle = { fg = fn.fg, bold = true, default = true }
   groups.LazydiffFloatSelected = {
     bg = first_bg({ "CursorLine", "Visual" }),
     bold = true,

@@ -195,6 +195,14 @@ require("lazydiff").setup({
   },
   show_hunk_header = true,       -- show "@@ -a,b +c,d @@" between hunks
   word_diff = true,              -- emphasise changed words inside change hunks
+  highlights = {                 -- per-slot colour override; defaults below
+    add = nil,                   -- group name, or { fg=, bg=, bold=, italic=, underline= }
+    delete = nil,
+    add_word = nil,
+    delete_word = nil,
+    add_sign = nil,
+    delete_sign = nil,
+  },
   read_only = false,             -- lock the buffer while overlay is on (off by default)
   auto_refresh = true,           -- refresh on BufWritePost / FileChangedShellPost / BufReadPost
   live_refresh = true,           -- also refresh on TextChanged / TextChangedI
@@ -235,6 +243,12 @@ require("lazydiff").setup({
 `setup()` validates option types and raises on a mismatch, so a typo like
 `float = { width = "0.9" }` fails loudly instead of rendering oddly.
 
+`highlights` takes six optional slots: `add`, `delete`, `add_word`,
+`delete_word`, `add_sign`, `delete_sign`. Give a slot a highlight group name
+(a string) or a spec table with `fg`, `bg`, `bold`, `italic`, `underline`. An
+unset add-side slot falls back to `DiffAdd`, an unset delete-side slot to
+`DiffDelete`, and a `Lazydiff*` group you define yourself still wins.
+
 ### Writable mode (default)
 
 The overlay is editable by default — the primary workflow this plugin
@@ -259,21 +273,23 @@ save, set `live_refresh = false`.
 
 ## Highlight groups
 
-All defined as `default = true` so your overrides win. Colours are pulled
-from `DiffAdd` / `DiffDelete` / `Function` / `Normal` at setup time and
-re-applied on `ColorScheme` so theme switches still work.
+No default colour palette ships with the plugin. All groups are defined as
+`default = true` so your overrides win. An unset slot reads the colourscheme's
+`DiffAdd` / `DiffDelete` at setup time and re-applies on `ColorScheme`, so
+theme switches still work. When the colourscheme defines no `bg`, the overlay
+draws no band.
 
-`LazydiffAdd` paints the in-buffer line via `hl_group` + `hl_eol`, so it's
-**bg-only** — setting a fg there would override treesitter / syntax colours
-on the added line. `LazydiffDelete` colours virtual deleted lines (which
-have no syntax of their own), so it carries both fg and bg. The `*Word`
-groups are a stronger shade of the line band; on schemes where `DiffAdd`
-has no background they fall back to bold + underline.
+`LazydiffAdd` paints the in-buffer line and `LazydiffDelete` paints virtual
+deleted lines, both via `hl_group` + `hl_eol` with **`bg` only** — no group
+sets a foreground on a diff line, so treesitter / syntax colours survive
+touched. The `*Word` groups are a stronger shade of the line band; on schemes
+where `DiffAdd` has no background they fall back to bold + underline. Only
+`LazydiffAddSign` / `LazydiffDeleteSign` carry an `fg`.
 
 | Group                | Default                                              |
 | -------------------- | ---------------------------------------------------- |
 | `LazydiffAdd`        | bg of `DiffAdd` (no fg, preserves syntax)            |
-| `LazydiffDelete`     | fg + bg of `DiffDelete`                              |
+| `LazydiffDelete`     | bg of `DiffDelete` (no fg, preserves syntax)         |
 | `LazydiffAddWord`    | bold, `LazydiffAdd` bg blended toward `Normal` fg    |
 | `LazydiffDeleteWord` | bold, `LazydiffDelete` bg blended toward `Normal` fg |
 | `LazydiffAddSign`    | bold, fg of `DiffAdd`, bg of `Normal`                |
@@ -300,13 +316,33 @@ foreground in most colorschemes) and fall back to `DiffAdd` / `DiffDelete` /
 | `LazydiffFloatSelected`     | bg of `CursorLine` / `Visual`, bold      |
 | `LazydiffFold`              | fg of `Comment` (folded-context lines)   |
 
-If you want fg-only (Claude-style) instead of the lazygit/`git diff`
-look, override the bg to `NONE` after `setup()`:
+To change the band colour, override `bg` only after `setup()`:
 
 ```lua
-vim.api.nvim_set_hl(0, "LazydiffAdd",    { fg = "#a6e3a1", bg = "NONE" })
-vim.api.nvim_set_hl(0, "LazydiffDelete", { fg = "#f38ba8", bg = "NONE" })
+vim.api.nvim_set_hl(0, "LazydiffAdd",    { bg = "#2a3f33" })
+vim.api.nvim_set_hl(0, "LazydiffDelete", { bg = "#3a2020" })
 ```
+
+The overlay never sets a foreground on diff lines, so treesitter colours
+survive untouched.
+
+### Setting the groups from `setup()`
+
+The `highlights` option takes a group name or a spec table per slot, so you
+do not have to call `nvim_set_hl` yourself:
+
+```lua
+require("lazydiff").setup({
+  highlights = {
+    add = "Search",                             -- a group name
+    delete = { bg = "#3a2020", italic = true }, -- or a spec table
+  },
+})
+```
+
+Slots you leave out keep the defaults above. Every `Lazydiff*` group can
+still be overridden directly, as in the snippet before this one — a group you
+define yourself always wins.
 
 ## Suggested keymap
 

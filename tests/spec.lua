@@ -64,6 +64,18 @@ check("rejects a non-string ref", not ok_bad)
 ok_bad = pcall(require("lazydiff.config").setup, { float = { width = "wide" } })
 check("rejects a non-numeric float.width", not ok_bad)
 check("accepts a valid table", pcall(require("lazydiff.config").setup, { ref = "HEAD" }))
+check(
+  "accepts a highlights slot given a group name",
+  pcall(require("lazydiff.config").validate, { highlights = { add = "DiffAdd" } })
+)
+check(
+  "rejects a highlights slot that is neither a string nor a table",
+  not pcall(require("lazydiff.config").validate, { highlights = { add = 5 } })
+)
+check(
+  "rejects an unknown highlights slot",
+  not pcall(require("lazydiff.config").validate, { highlights = { adds = "DiffAdd" } })
+)
 configure()
 
 -- ---------------------------------------------------------------------------

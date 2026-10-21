@@ -9,6 +9,10 @@ M.defaults = {
     add = "+", -- rendered in the sign column (max 2 cells)
     delete = "- ", -- prefix on virt_lines for deleted content
   },
+  -- Highlight source per overlay slot. Each value is a group name string or a
+  -- literal attribute table. Leave a slot unset to use the DiffAdd/DiffDelete
+  -- default. Slots: add, delete, add_word, delete_word, add_sign, delete_sign.
+  highlights = {},
   show_hunk_header = true,
   word_diff = true, -- highlight the changed words inside change hunks
   read_only = false,
@@ -63,6 +67,15 @@ end
 
 local BACKENDS = { auto = true, git = true, jj = true }
 
+local HIGHLIGHT_SLOTS = {
+  add = true,
+  delete = true,
+  add_word = true,
+  delete_word = true,
+  add_sign = true,
+  delete_sign = true,
+}
+
 local function validate(opts)
   check("ref", opts.ref, "string")
   if opts.ref ~= nil and opts.ref:match("^%s*$") then
@@ -77,6 +90,22 @@ local function validate(opts)
     error(msg, 3)
   end
   check("signs", opts.signs, "table")
+  check("highlights", opts.highlights, "table")
+  if type(opts.highlights) == "table" then
+    for slot, spec in pairs(opts.highlights) do
+      if not HIGHLIGHT_SLOTS[slot] then
+        local msg = ("lazydiff: option `highlights.%s` is not a known slot"):format(tostring(slot))
+        error(msg, 3)
+      end
+      if type(spec) ~= "string" and type(spec) ~= "table" then
+        local msg = ("lazydiff: option `highlights.%s` must be a string or a table, got %s"):format(
+          tostring(slot),
+          type(spec)
+        )
+        error(msg, 3)
+      end
+    end
+  end
   check("show_hunk_header", opts.show_hunk_header, "boolean")
   check("word_diff", opts.word_diff, "boolean")
   check("read_only", opts.read_only, "boolean")
