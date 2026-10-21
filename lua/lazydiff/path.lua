@@ -1,5 +1,6 @@
--- Pure helpers shared by every VCS backend. Nothing here touches the
--- filesystem or a subprocess, so it is safe to require from anywhere.
+-- Helpers shared by every VCS backend. Nothing here spawns a subprocess, and
+-- only is_regular_file() touches the filesystem, so it is safe to require from
+-- anywhere.
 local M = {}
 
 function M.relpath(root, abspath)
@@ -11,6 +12,20 @@ function M.relpath(root, abspath)
     return nil
   end
   return abspath:sub(#prefix + 1)
+end
+
+-- True only for a path that resolves to a regular file. fs_stat follows
+-- symlinks, so a link to a regular file counts. Directories, sockets, FIFOs and
+-- vanished paths are all false.
+function M.is_regular_file(abs)
+  if not abs or abs == "" then
+    return false
+  end
+  local ok, stat = pcall(vim.uv.fs_stat, abs)
+  if not ok or not stat then
+    return false
+  end
+  return stat.type == "file"
 end
 
 function M.is_binary(content)
