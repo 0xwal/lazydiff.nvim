@@ -94,6 +94,8 @@ use({
 | `:LazydiffYank [reg]` | Yank the hunk's deleted lines into a register (default `"`)     |
 | `:LazydiffFloat [ref]`| Toggle the float over **every** changed file, optionally against `ref` |
 | `:LazydiffFloatOff`   | Close the float                                                 |
+| `:LazydiffStart`      | Start a session: entered files with changes against `config.options.ref` get the overlay |
+| `:LazydiffStop`       | End the session and disable the overlays it enabled             |
 
 `ref` completes against branches and tags. `:Lazydiff main` reviews the
 buffer against `main`; running it again with the same ref turns the overlay

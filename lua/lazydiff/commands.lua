@@ -70,6 +70,14 @@ function M.setup()
   cmd("LazydiffFloatOff", function()
     require("lazydiff").close_float()
   end, { desc = "Close the lazydiff float" })
+
+  cmd("LazydiffStart", function()
+    require("lazydiff.session").start()
+  end, { desc = "Start a lazydiff session: overlay changed files on enter" })
+
+  cmd("LazydiffStop", function()
+    require("lazydiff.session").stop()
+  end, { desc = "Stop the lazydiff session and disable the overlays it enabled" })
 end
 
 return M
