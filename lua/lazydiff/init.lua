@@ -125,6 +125,54 @@ function M.goto_next_all()
   M.goto_first(buf)
 end
 
+-- One quickfix entry per hunk across all changed files of `ref`.
+function M.quickfix(ref)
+  local config = require("lazydiff.config")
+  local vcs = require("lazydiff.vcs")
+  local diff_mod = require("lazydiff.diff")
+  local path_util = require("lazydiff.path")
+  ref = ref or require("lazydiff.session").ref or config.options.ref
+
+  local backend, err, root = vcs.get(vcs.anchor_dir())
+  if not backend then
+    vim.notify("lazydiff: " .. (err or "not in a git or jj repository"), vim.log.levels.WARN)
+    return
+  end
+
+  local files, ferr = backend.changed_files(root, ref)
+  if not files then
+    vim.notify("lazydiff: " .. (ferr or "failed to list changed files"), vim.log.levels.WARN)
+    return
+  end
+
+  local items = {}
+  for _, entry in ipairs(files) do
+    if not entry.untracked and entry.status ~= "D" then
+      local blob = backend.file_at(root, entry.path, ref)
+      if blob and not path_util.is_binary(blob) then
+        local abs = root .. "/" .. entry.path
+        local old_lines = path_util.split_lines(blob)
+        local new_lines = vim.fn.readfile(abs)
+        for _, hunk in ipairs(diff_mod.compute(old_lines, new_lines)) do
+          items[#items + 1] = {
+            filename = abs,
+            lnum = hunk.new_start > 0 and hunk.new_start or 1,
+            col = 1,
+            text = diff_mod.format_hunk_header(hunk),
+          }
+        end
+      end
+    end
+  end
+
+  vim.fn.setqflist({}, " ", { title = "lazydiff " .. ref, items = items })
+  if #items > 0 then
+    vim.cmd("copen")
+  else
+    vim.notify("lazydiff: no changed hunks", vim.log.levels.INFO)
+  end
+end
+
 function M.open_float(opts)
   return require("lazydiff.float").open(opts)
 end

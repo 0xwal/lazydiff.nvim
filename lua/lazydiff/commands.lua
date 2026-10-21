@@ -97,6 +97,14 @@ function M.setup()
   cmd("LazydiffStop", function()
     require("lazydiff.session").stop()
   end, { desc = "Stop the lazydiff session and disable the overlays it enabled" })
+
+  cmd("LazydiffQf", function(c)
+    require("lazydiff").quickfix(ref_arg(c))
+  end, {
+    nargs = "?",
+    complete = complete_refs,
+    desc = "Fill the quickfix list with one entry per lazydiff hunk (optionally against a ref)",
+  })
 end
 
 return M
