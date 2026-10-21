@@ -38,9 +38,24 @@ function M.setup()
     require("lazydiff").refresh(nil, { baseline = true })
   end, { desc = "Refetch the baseline and re-render the lazydiff overlay" })
 
-  cmd("LazydiffNext", function()
-    require("lazydiff").goto_next()
-  end, { desc = "Jump to the next lazydiff hunk" })
+  cmd("LazydiffNext", function(c)
+    local mode = vim.trim(c.args or "")
+    if mode == "" or mode == "buffer" then
+      require("lazydiff").goto_next()
+    elseif mode == "all" then
+      require("lazydiff").goto_next_all()
+    else
+      vim.notify("lazydiff: LazydiffNext mode must be buffer or all", vim.log.levels.WARN)
+    end
+  end, {
+    nargs = "?",
+    complete = function(arglead)
+      return vim.tbl_filter(function(mode)
+        return mode:sub(1, #arglead) == arglead
+      end, { "buffer", "all" })
+    end,
+    desc = "Jump to the next lazydiff hunk (mode: buffer or all)",
+  })
 
   cmd("LazydiffPrev", function()
     require("lazydiff").goto_prev()

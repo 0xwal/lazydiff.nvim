@@ -60,6 +60,71 @@ function M.goto_prev(bufnr)
   return require("lazydiff.nav").goto_prev(bufnr or vim.api.nvim_get_current_buf())
 end
 
+-- Next hunk in the current file, else first hunk of the next changed file.
+function M.goto_next_all()
+  local config = require("lazydiff.config")
+  local vcs = require("lazydiff.vcs")
+  local ref = require("lazydiff.session").ref or config.options.ref
+
+  local backend, err, root = vcs.get(vcs.anchor_dir())
+  if not backend then
+    vim.notify("lazydiff: " .. (err or "not in a git or jj repository"), vim.log.levels.WARN)
+    return
+  end
+
+  local files, ferr = backend.changed_files(root, ref)
+  if not files then
+    vim.notify("lazydiff: " .. (ferr or "failed to list changed files"), vim.log.levels.WARN)
+    return
+  end
+
+  local paths = {}
+  for _, entry in ipairs(files) do
+    if not entry.untracked and entry.status ~= "D" then
+      paths[#paths + 1] = root .. "/" .. entry.path
+    end
+  end
+
+  local st = state()
+  local cur_buf = vim.api.nvim_get_current_buf()
+  local hunks = st.get_hunks(cur_buf)
+  if hunks and #hunks > 0 then
+    local nav = require("lazydiff.nav")
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    for _, h in ipairs(hunks) do
+      if nav.target_line(h) > row then
+        M.goto_next(cur_buf)
+        return
+      end
+    end
+  end
+
+  local cur_path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(cur_buf), ":p")
+  local idx = 0
+  for i, p in ipairs(paths) do
+    if p == cur_path then
+      idx = i
+      break
+    end
+  end
+
+  local target = paths[idx + 1]
+  if not target and config.options.nav and config.options.nav.wrap then
+    target = paths[1]
+  end
+  if not target then
+    vim.notify("lazydiff: no more changed files", vim.log.levels.INFO)
+    return
+  end
+
+  vim.cmd.edit(vim.fn.fnameescape(target))
+  local buf = vim.api.nvim_get_current_buf()
+  if not M.is_enabled(buf) and not M.enable(buf, ref) then
+    return
+  end
+  M.goto_first(buf)
+end
+
 function M.open_float(opts)
   return require("lazydiff.float").open(opts)
 end
