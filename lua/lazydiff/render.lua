@@ -28,6 +28,8 @@ local function word_ranges(hunk)
   return olds, news
 end
 
+local warned = {}
+
 -- Treesitter captures per line index: segs[i] = list of { col_start, col_end, capture_name }.
 -- Returns nil when no parser or query exists, or on any error.
 local function syntax_segments(text_lines, filetype)
@@ -37,6 +39,11 @@ local function syntax_segments(text_lines, filetype)
     end
     local lang = vim.treesitter.language.get_lang(filetype)
     if not lang then
+      local key = filetype .. ":lang"
+      if not warned[key] then
+        warned[key] = true
+        vim.notify("lazydiff: syntax highlight skipped: lang is nil for filetype " .. filetype, vim.log.levels.WARN)
+      end
       return nil
     end
     local text = table.concat(text_lines, "\n")
@@ -44,6 +51,11 @@ local function syntax_segments(text_lines, filetype)
     local tree = parser:parse()[1]
     local query = vim.treesitter.query.get(lang, "highlights")
     if not query then
+      local key = filetype .. ":query"
+      if not warned[key] then
+        warned[key] = true
+        vim.notify("lazydiff: syntax highlight skipped: query is nil for filetype " .. filetype, vim.log.levels.WARN)
+      end
       return nil
     end
     local pending = {}
@@ -108,10 +120,11 @@ local function syntax_segments(text_lines, filetype)
     end
     return out
   end)
-  if ok then
-    return result
+  if not ok then
+    vim.notify("lazydiff: syntax highlight skipped: " .. tostring(result), vim.log.levels.WARN)
+    return nil
   end
-  return nil
+  return result
 end
 
 local syn_groups = {}
@@ -135,12 +148,36 @@ local function delete_hl_for(capture_name)
   return name
 end
 
+local word_syn_groups = {}
+
+-- Word-changed span: bg of LazydiffDeleteWord, fg of the syntax capture.
+-- Falls back to LazydiffDeleteWord when there is no capture.
+local function word_hl_for(capture_name)
+  if not capture_name then
+    return "LazydiffDeleteWord"
+  end
+  local safe = capture_name:gsub("[^%w_]", "_")
+  if word_syn_groups[safe] then
+    return word_syn_groups[safe]
+  end
+  local fg = vim.api.nvim_get_hl(0, { name = "@" .. capture_name, link = false }).fg
+  local word = vim.api.nvim_get_hl(0, { name = "LazydiffDeleteWord", link = false })
+  if not fg then
+    return "LazydiffDeleteWord"
+  end
+  local name = "LazydiffDeleteWordSyn_" .. safe
+  vim.api.nvim_set_hl(0, name, { fg = fg, bg = word.bg, bold = word.bold, underline = word.underline, default = true })
+  word_syn_groups[safe] = name
+  return name
+end
+
 -- A deleted line as virt_text chunks: the sign, then the content split into
 -- syntax spans. Word ranges take priority over syntax spans.
 local function delete_chunks(content, ranges, sign, segs)
   local chunks = { { sign, "LazydiffDeleteSign" } }
   local len = #content
   local groups = {}
+  local caps = {}
   for c = 1, len do
     groups[c] = "LazydiffDelete"
   end
@@ -148,11 +185,12 @@ local function delete_chunks(content, ranges, sign, segs)
     local g = delete_hl_for(s[3])
     for c = s[1] + 1, math.min(s[2], len) do
       groups[c] = g
+      caps[c] = s[3]
     end
   end
   for _, r in ipairs(ranges or {}) do
     for c = r[1] + 1, math.min(r[2], len) do
-      groups[c] = "LazydiffDeleteWord"
+      groups[c] = word_hl_for(caps[c])
     end
   end
   local i = 1
