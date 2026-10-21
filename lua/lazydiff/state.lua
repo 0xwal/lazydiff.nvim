@@ -71,11 +71,35 @@ local function fetch_baseline(loc, ref)
   return path_util.split_lines(blob)
 end
 
+-- Author label for the hunk header: "Jane Doe · Aug 3 2025 (6 months ago)".
+-- Each lookup costs a subprocess and refresh runs on every change, so the
+-- formatted label is memoized on the buffer state, keyed by the resolved repo
+-- root plus the ref string. A failed lookup is memoized too, so a broken ref
+-- does not respawn git or jj on every tick.
 local function author_for(st, ref)
   if not config.options.show_author_header or not st.backend or not st.repo then
     return nil
   end
-  return st.backend.author(st.repo, ref)
+  if type(st.backend.author) ~= "function" then
+    return nil
+  end
+  local key = (st.backend.name or "") .. "\0" .. st.repo .. "\0" .. tostring(ref)
+  local cached = st.author_cache
+  local now = os.time()
+  if cached and cached.key == key and now - cached.at < 60 then
+    return cached.label
+  end
+  local name, when = st.backend.author(st.repo, ref)
+  local label
+  if name then
+    if type(when) == "string" and when ~= "" then
+      label = name .. " · " .. when
+    else
+      label = name
+    end
+  end
+  st.author_cache = { key = key, label = label, at = now }
+  return label
 end
 
 local function recompute(bufnr, baseline)
@@ -294,6 +318,8 @@ function M.enable(bufnr, ref)
   state.enabled = true
   state.external = nil
   state.ref = ref
+  -- The ref just changed, so the memoized author label no longer applies.
+  state.author_cache = nil
   state.path = buf_path(bufnr)
   state.repo = loc.repo
   state.rel = loc.rel
@@ -337,6 +363,7 @@ function M.disable(bufnr)
   stop_timer(state)
   stop_watcher(state)
   state.baseline, state.baseline_lines = nil, nil
+  state.author_cache = nil
 
   if vim.api.nvim_buf_is_valid(bufnr) then
     render.clear(bufnr)
@@ -418,6 +445,9 @@ function M.refresh(bufnr, opts)
         if watch_key(state) ~= state.watch_key then
           start_watcher(bufnr, state)
         end
+      end
+      if not fetch_failed then
+        state.author_cache = nil
       end
       -- Any other failure keeps the last known baseline.
     end

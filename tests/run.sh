@@ -22,3 +22,7 @@ bash "$here/fixture.sh" "$fixture" >/dev/null
 LAZYDIFF_FIXTURE="$fixture" nvim --headless --clean \
   -u "$here/minimal_init.lua" \
   -l "$here/spec.lua"
+
+nvim --headless --clean \
+  -u "$here/minimal_init.lua" \
+  -l "$here/time_spec.lua"

@@ -1,5 +1,7 @@
 local M = {}
 
+local time_util = require("lazydiff.time")
+
 M.name = "jj"
 
 local function run(cwd, args)
@@ -109,19 +111,40 @@ function M.refs(root)
   return list
 end
 
--- Author name of the change at `ref`, or nil on failure.
+-- jj prints the timestamp in the change's own offset, so it is handed to
+-- time.from_strings as text: no zone arithmetic and no epoch round-trip. The
+-- `ago()` template function supplies the relative phrase, so the date and the
+-- age always agree.
+local AUTHOR_TEMPLATE =
+  'author.name() ++ "\\t" ++ author.timestamp().ago() ++ "\\t" ++ author.timestamp()'
+
+-- Author name and the formatted author date ("Aug 3 2025 (6 months ago)") of
+-- the change at `ref`, or nil on failure. The date is nil when the template
+-- output is malformed, so the caller shows the bare name.
 function M.author(root, ref)
   ref = resolve_ref(ref)
-  local code, out = run(root, { "log", "-r", ref, "--no-graph", "-T", "author.name()" })
+  -- --limit 1 keeps a multi-commit revset from reporting the tip's author.
+  local code, out =
+    run(root, { "log", "-r", ref, "--limit", "1", "--no-graph", "-T", AUTHOR_TEMPLATE })
   if code ~= 0 then
     return nil
   end
-  local name = lines_of(out)[1]
-  if not name then
+  local line = lines_of(out)[1]
+  if not line then
     return nil
   end
-  name = trim(name)
-  return name ~= "" and name or nil
+  -- Fields: name, ago phrase, raw timestamp. A short line still yields the
+  -- name, so a changed template degrades instead of raising.
+  local fields = vim.split(line, "\t", { plain = true })
+  local name = trim(fields[1] or "")
+  if name == "" then
+    return nil
+  end
+  local when = time_util.from_strings(fields[3], fields[2])
+  if when == "" then
+    return name, nil
+  end
+  return name, when
 end
 
 -- Tracked-path sets, keyed by root and ref. A failed `file show` asks whether

@@ -10,6 +10,10 @@
 --   state_dir(root)      directory the watcher observes, or nil
 --   refs(root)           list of ref names, working-copy ref first
 --   file_at(root, rel, ref)   content, or nil + message + "untracked"/"error"
+--   author(root, ref)    name, when_string -- when_string is a formatted
+--                        date such as "Aug 3 2025 (6 months ago)", or nil
+--                        when the date is unusable; the whole call returns
+--                        nil when the ref or its author cannot be read
 --   changed_files(root, ref)  array of { path, status, added, deleted,
 --                             binary, untracked, old_path }, or nil + message
 --   watch_names()        directory entries under state_dir worth reacting to

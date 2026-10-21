@@ -1,4 +1,5 @@
 local path = require("lazydiff.path")
+local time_util = require("lazydiff.time")
 
 local M = {}
 
@@ -82,14 +83,30 @@ function M.refs(root)
   return list
 end
 
--- Author name of the commit at `ref`, or nil on failure.
+-- Author name and the formatted author date ("Aug 3 2025 (6 months ago)")
+-- of the commit at `ref`, or nil on failure. The date is nil when %at is
+-- missing or unusable.
 function M.author(root, ref)
-  local code, out = run(root, { "log", "-1", "--format=%an", ref or "HEAD" })
+  local code, out = run(root, { "log", "-1", "--format=%an%x09%at", ref or "HEAD" })
   if code ~= 0 then
     return nil
   end
-  local name = trim(out)
-  return name ~= "" and name or nil
+  local line = trim(out)
+  -- %at is signed: a commit authored before 1970 prints a negative epoch, and
+  -- a digits-only pattern would leave the tab and the minus glued to the name.
+  local name, at = line:match("^(.-)\t(-?%d+)$")
+  if not name then
+    name, at = line, nil
+  end
+  name = trim(name)
+  if name == "" then
+    return nil
+  end
+  local when = at and time_util.label(tonumber(at)) or nil
+  if when == "" then
+    when = nil
+  end
+  return name, when
 end
 
 -- Directory entries the watcher treats as "the baseline may have moved". HEAD
