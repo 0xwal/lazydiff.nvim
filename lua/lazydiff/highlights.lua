@@ -115,6 +115,15 @@ local function blend(color, target, amount)
   return bit.bor(bit.lshift(channel(16), 16), bit.lshift(channel(8), 8), channel(0))
 end
 
+-- Word-level groups link to the colourscheme's intra-line group when it exists,
+-- else to the line-band group of the same side.
+local function word_target(preferred, fallback)
+  if vim.fn.hlexists(preferred) == 1 then
+    return preferred
+  end
+  return fallback
+end
+
 local function apply()
   local da = source("add")
   local dd = source("delete")
@@ -137,27 +146,29 @@ local function apply()
   -- colorschemes paint the line bg over the virt_text region too, swallowing
   -- the marker.
   --
-  -- The *Word groups mark the changed spans inside a change hunk. They are a
-  -- stronger shade of the line band when one exists, otherwise bold+underline
-  -- so they still stand out on fg-only schemes.
+  -- The *Word groups mark the changed spans inside a change hunk.
   local groups = {
     LazydiffAdd = { bg = da.bg, default = true },
     LazydiffDelete = { bg = dd.bg, default = true },
     LazydiffAddSign = { fg = ds.fg or da.fg, bg = nm.bg, bold = true, default = true },
     LazydiffDeleteSign = { fg = dds.fg or dd.fg, bg = nm.bg, bold = true, default = true },
     LazydiffHunkHeader = { fg = fn.fg, default = true },
-    LazydiffAddWord = {
-      bg = (dw.bg or da.bg) and blend(dw.bg or da.bg, toward, 0.2) or nil,
-      bold = true,
-      underline = (dw.bg or da.bg) == nil,
-      default = true,
-    },
-    LazydiffDeleteWord = {
-      bg = (ddw.bg or dd.bg) and blend(ddw.bg or dd.bg, toward, 0.2) or nil,
-      bold = true,
-      underline = (ddw.bg or dd.bg) == nil,
-      default = true,
-    },
+    LazydiffAddWord = type(config.options.highlights and config.options.highlights.add_word) == "table"
+        and vim.tbl_extend("force", dw, { default = true })
+      or {
+        link = type(config.options.highlights and config.options.highlights.add_word) == "string"
+            and config.options.highlights.add_word
+          or word_target("DiffAddText", "DiffAdd"),
+        default = true,
+      },
+    LazydiffDeleteWord = type(config.options.highlights and config.options.highlights.delete_word) == "table"
+        and vim.tbl_extend("force", ddw, { default = true })
+      or {
+        link = type(config.options.highlights and config.options.highlights.delete_word) == "string"
+            and config.options.highlights.delete_word
+          or word_target("DiffDeleteText", "DiffDelete"),
+        default = true,
+      },
   }
 
   -- Float mode. Status letters and counts are fg-only text in the sidebar, so
