@@ -210,10 +210,13 @@ end
 -- hunk.old_start .. hunk.old_start + hunk.old_count - 1.
 local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_ranges, segs, author)
   local lines = {}
-  if show_header then
-    local header = { diff_mod.format_hunk_header(hunk), "LazydiffHunkHeader" }
-    local chunks = { header }
-    if config.options.show_author_header and author then
+  local show_author = config.options.show_author_header and author
+  if show_header or show_author then
+    local chunks = {}
+    if show_header then
+      chunks[#chunks + 1] = { diff_mod.format_hunk_header(hunk), "LazydiffHunkHeader" }
+    end
+    if show_author then
       chunks[#chunks + 1] = { "  author: " .. author, "LazydiffHunkHeader" }
     end
     lines[#lines + 1] = chunks
