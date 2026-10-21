@@ -293,10 +293,11 @@ function M.enable(bufnr, ref)
   state.backend = loc.backend
   state.state_dir = loc.backend.state_dir(loc.repo)
   state.baseline = baseline
+  state.baseline_lines = baseline
   state.hunks = hunks
   buffers[bufnr] = state
 
-  render.render(bufnr, hunks)
+  render.render(bufnr, hunks, state.baseline_lines)
 
   if config.options.read_only then
     vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
@@ -328,6 +329,7 @@ function M.disable(bufnr)
 
   stop_timer(state)
   stop_watcher(state)
+  state.baseline, state.baseline_lines = nil, nil
 
   if vim.api.nvim_buf_is_valid(bufnr) then
     render.clear(bufnr)
@@ -392,10 +394,12 @@ function M.refresh(bufnr, opts)
       local baseline, _, reason = fetch_baseline(source, state.ref)
       if baseline then
         state.baseline = baseline
+        state.baseline_lines = baseline
       elseif reason == "untracked" then
         -- The file vanished from `ref` (e.g. checkout of an older branch):
         -- everything in the buffer is now new.
         state.baseline = {}
+        state.baseline_lines = state.baseline
       else
         fetch_failed = true
       end
@@ -419,7 +423,7 @@ function M.refresh(bufnr, opts)
 
   local hunks = recompute(bufnr, state.baseline)
   state.hunks = hunks
-  render.render(bufnr, hunks)
+  render.render(bufnr, hunks, state.baseline_lines)
 end
 
 -- Register hunks computed elsewhere (the float's scratch pane) so nav.lua can

@@ -124,21 +124,20 @@ local function delete_chunks(content, ranges, sign, segs)
   return chunks
 end
 
-local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_ranges)
+-- segs is keyed by baseline row (1-based). Deleted rows are
+-- hunk.old_start .. hunk.old_start + hunk.old_count - 1.
+local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_ranges, segs)
   local lines = {}
   if show_header then
     lines[#lines + 1] = { { diff_mod.format_hunk_header(hunk), "LazydiffHunkHeader" } }
   end
-  local segs
-  if hunk.old_lines and #hunk.old_lines > 0 then
-    segs = syntax_segments(hunk.old_lines, vim.bo[bufnr].filetype)
-  end
   for i, content in ipairs(hunk.old_lines) do
+    local row = hunk.old_start + i - 1
     lines[#lines + 1] = delete_chunks(
       content,
       old_word_ranges and old_word_ranges[i],
       signs.delete,
-      segs and segs[i]
+      segs and segs[row]
     )
   end
   return lines
@@ -181,7 +180,9 @@ local function mark_added_line(bufnr, line_0based, sign_text, word_ranges_for_li
   end
 end
 
-function M.render(bufnr, hunks)
+-- baseline_lines: full baseline file lines. Nil (e.g. scratch float) falls
+-- back to plain LazydiffDelete for deleted lines.
+function M.render(bufnr, hunks, baseline_lines)
   M.clear(bufnr)
   if not hunks or #hunks == 0 then
     return
@@ -192,9 +193,15 @@ function M.render(bufnr, hunks)
   local show_header = cfg.show_hunk_header
   local total_lines = vim.api.nvim_buf_line_count(bufnr)
 
+  -- Parse the full baseline once per render pass, not per hunk.
+  local segs
+  if baseline_lines and #baseline_lines > 0 then
+    segs = syntax_segments(baseline_lines, vim.bo[bufnr].filetype)
+  end
+
   for _, hunk in ipairs(hunks) do
     local old_words, new_words = word_ranges(hunk)
-    local above_lines = build_above_virt_lines(bufnr, hunk, signs, show_header, old_words)
+    local above_lines = build_above_virt_lines(bufnr, hunk, signs, show_header, old_words, segs)
 
     if hunk.new_count > 0 then
       -- Hunk has buffer-anchored content: place header+deletes ABOVE the first new line.
