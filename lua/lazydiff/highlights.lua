@@ -124,6 +124,19 @@ local function word_target(preferred, fallback)
   return fallback
 end
 
+-- A string slot value or nil links to that group. A table slot value is the
+-- literal spec. nil uses `default_group`.
+local function slot_link(slot, default_group)
+  local value = (config.options.highlights or {})[slot]
+  if type(value) == "table" then
+    return vim.deepcopy(value)
+  end
+  if type(value) == "string" then
+    return { link = value }
+  end
+  return { link = default_group }
+end
+
 local function apply()
   local da = source("add")
   local dd = source("delete")
@@ -152,7 +165,7 @@ local function apply()
     LazydiffDelete = { bg = dd.bg, default = true },
     LazydiffAddSign = { fg = ds.fg or da.fg, bg = nm.bg, bold = true, default = true },
     LazydiffDeleteSign = { fg = dds.fg or dd.fg, bg = nm.bg, bold = true, default = true },
-    LazydiffHunkHeader = { fg = fn.fg, default = true },
+    LazydiffHunkHeader = vim.tbl_extend("force", slot_link("hunk_header", "Comment"), { default = true }),
     LazydiffAddWord = type(config.options.highlights and config.options.highlights.add_word) == "table"
         and vim.tbl_extend("force", dw, { default = true })
       or {

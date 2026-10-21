@@ -11,7 +11,8 @@ M.defaults = {
   },
   -- Highlight source per overlay slot. Each value is a group name string or a
   -- literal attribute table. Leave a slot unset to use the DiffAdd/DiffDelete
-  -- default. Slots: add, delete, add_word, delete_word, add_sign, delete_sign.
+  -- default. Slots: add, delete, add_word, delete_word, add_sign, delete_sign,
+  -- hunk_header.
   highlights = {},
   show_hunk_header = true,
   word_diff = true, -- highlight the changed words inside change hunks
@@ -74,6 +75,7 @@ local HIGHLIGHT_SLOTS = {
   delete_word = true,
   add_sign = true,
   delete_sign = true,
+  hunk_header = true,
 }
 
 local function validate(opts)

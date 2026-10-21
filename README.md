@@ -202,6 +202,7 @@ require("lazydiff").setup({
     delete_word = nil,
     add_sign = nil,
     delete_sign = nil,
+    hunk_header = nil,           -- "@@ -a,b +c,d @@" header; default links to Comment
   },
   read_only = false,             -- lock the buffer while overlay is on (off by default)
   auto_refresh = true,           -- refresh on BufWritePost / FileChangedShellPost / BufReadPost
@@ -243,8 +244,9 @@ require("lazydiff").setup({
 `setup()` validates option types and raises on a mismatch, so a typo like
 `float = { width = "0.9" }` fails loudly instead of rendering oddly.
 
-`highlights` takes six optional slots: `add`, `delete`, `add_word`,
-`delete_word`, `add_sign`, `delete_sign`. Give a slot a highlight group name
+`highlights` takes seven optional slots: `add`, `delete`, `add_word`,
+`delete_word`, `add_sign`, `delete_sign`, `hunk_header`. `hunk_header` styles
+the `@@ -a,b +c,d @@` header and links to `Comment` by default. Give a slot a highlight group name
 (a string) or a spec table with `fg`, `bg`, `bold`, `italic`, `underline`. An
 unset add-side slot falls back to `DiffAdd`, an unset delete-side slot to
 `DiffDelete`, and a `Lazydiff*` group you define yourself still wins.
@@ -294,7 +296,7 @@ where `DiffAdd` has no background they fall back to bold + underline. Only
 | `LazydiffDeleteWord` | bold, `LazydiffDelete` bg blended toward `Normal` fg |
 | `LazydiffAddSign`    | bold, fg of `DiffAdd`, bg of `Normal`                |
 | `LazydiffDeleteSign` | bold, fg of `DiffDelete`, bg of `Normal`             |
-| `LazydiffHunkHeader` | fg of `Function`, no background                      |
+| `LazydiffHunkHeader` | `hunk_header` slot, default links to `Comment`       |
 
 Float mode adds the groups below. These are fg-only text in the sidebar, so
 they source from `Added` / `Removed` / `Changed` first (which carry a
