@@ -71,9 +71,13 @@ function M.setup()
     require("lazydiff").close_float()
   end, { desc = "Close the lazydiff float" })
 
-  cmd("LazydiffStart", function()
-    require("lazydiff.session").start()
-  end, { desc = "Start a lazydiff session: overlay changed files on enter" })
+  cmd("LazydiffStart", function(c)
+    require("lazydiff.session").start(ref_arg(c))
+  end, {
+    nargs = "?",
+    complete = complete_refs,
+    desc = "Start a lazydiff session: overlay changed files on enter (optionally against a ref)",
+  })
 
   cmd("LazydiffStop", function()
     require("lazydiff.session").stop()

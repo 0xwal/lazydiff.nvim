@@ -47,7 +47,8 @@ function M.check(bufnr)
     end
 
     local config = require("lazydiff.config")
-    local files = backend.changed_files(root, config.options.ref)
+    local ref = M.ref or config.options.ref
+    local files = backend.changed_files(root, ref)
     if not files then
       return
     end
@@ -58,7 +59,7 @@ function M.check(bufnr)
     end
     for _, file in ipairs(files) do
       if file.path == rel then
-        if require("lazydiff").enable(bufnr) then
+        if require("lazydiff").enable(bufnr, ref) then
           remember(bufnr)
         end
         return
@@ -67,7 +68,8 @@ function M.check(bufnr)
   end)
 end
 
-function M.start()
+function M.start(ref)
+  M.ref = ref
   M.active = true
   local group = vim.api.nvim_create_augroup(GROUP, { clear = true })
   vim.api.nvim_create_autocmd("BufEnter", {
