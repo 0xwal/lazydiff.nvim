@@ -150,7 +150,7 @@ function M.quickfix(ref)
   end
 
   local items = {}
-  local no_baseline = 0
+  local skipped = {}
   for _, entry in ipairs(files) do
     if not entry.untracked and entry.status ~= "D" then
       local abs = root .. "/" .. entry.path
@@ -183,7 +183,7 @@ function M.quickfix(ref)
               }
             end
           else
-            no_baseline = no_baseline + 1
+            skipped[#skipped + 1] = entry.path
             items[#items + 1] = {
               filename = abs,
               lnum = 1,
@@ -193,7 +193,7 @@ function M.quickfix(ref)
             }
           end
         elseif not blob then
-          no_baseline = no_baseline + 1
+          skipped[#skipped + 1] = entry.path
         end
       end
     end
@@ -205,8 +205,19 @@ function M.quickfix(ref)
   else
     vim.notify("lazydiff: no changed hunks", vim.log.levels.INFO)
   end
-  if no_baseline > 0 then
-    vim.notify("lazydiff: skipped " .. no_baseline .. " changed path(s) with no baseline", vim.log.levels.WARN)
+  if #skipped > 0 then
+    local shown = {}
+    for i = 1, math.min(#skipped, 3) do
+      shown[i] = skipped[i]
+    end
+    local msg = "lazydiff: skipped "
+      .. #skipped
+      .. " changed path(s) with no baseline: "
+      .. table.concat(shown, ", ")
+    if #skipped > 3 then
+      msg = msg .. " and " .. (#skipped - 3) .. " more"
+    end
+    vim.notify(msg, vim.log.levels.WARN)
   end
 end
 
