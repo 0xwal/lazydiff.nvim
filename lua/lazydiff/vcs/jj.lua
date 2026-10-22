@@ -151,6 +151,38 @@ function M.author(root, ref)
   return name, when
 end
 
+-- Short change id and first line of the description at `ref`, or nil on
+-- failure. An empty description reads as "(no description)".
+function M.commit_info(root, ref)
+  local _, target = baseline(root, ref)
+  local code, out = run(
+    root,
+    {
+      "log",
+      "-r",
+      target,
+      "--no-graph",
+      "-T",
+      'change_id.short(8) ++ "\\t" ++ description.first_line()',
+    }
+  )
+  if code ~= 0 then
+    return nil
+  end
+  local line = lines_of(out)[1]
+  if not line then
+    return nil
+  end
+  local short, subject = line:match("^(.-)\t(.*)$")
+  if not short then
+    return nil
+  end
+  if subject == "" then
+    subject = "(no description)"
+  end
+  return short, subject
+end
+
 -- Tracked-path sets, keyed by root and ref. A failed `file show` asks whether
 -- the path is tracked at all; without a cache that is a full `jj file list`
 -- scan each time. Entries expire after a few seconds, and an op change makes

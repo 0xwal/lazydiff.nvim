@@ -190,6 +190,7 @@ Defaults:
     signs = { add = "+", delete = "- " },
     show_hunk_header = true,
     show_author_header = false,
+    show_commit_header = false,
     word_diff = true,
     read_only = false,
     auto_refresh = true,
@@ -237,12 +238,24 @@ Defaults:
                     date is the baseline revision's author date. The
                     relative part is English and is refreshed on each
                     render, cached for at most 60 seconds; jj supplies the
-                    age phrase itself. Both options are independent: hunk
+                    age phrase itself. The three options are independent: hunk
                     header on and author on puts the author text after the
                     `@@` text on the same line; hunk header off and author
-                    on puts the author text alone; both off drops the
+                    on puts the author text alone; all off drops the
                     header line. A nil author, or an unreadable date,
-                    leaves the name only, or no header line.
+                    leaves the name only, or no header line. The commit
+                    header adds its text after the author text; see
+                    `show_commit_header`.
+`show_commit_header`                                    *show_commit_header*
+                    Append the baseline's short commit id and the first
+                    line of its message to the header line, after the
+                    author text, separated by two spaces. jj shows
+                    `change uyknllow  bump version`; git shows
+                    `commit 79ed13f  bump version`. The commit is the
+                    baseline commit, the same revision the author comes
+                    from. An empty message shows `(no description)`. The
+                    option is independent of `show_author_header` and
+                    `show_hunk_header`. Both backends support it.
 `word_diff`         Emphasise changed words inside change hunks whose lines
                     pair up one-to-one.
 `read_only`         Lock the buffer while the overlay is on.
@@ -301,6 +314,6 @@ resolves to, and checks that the configuration validates.
   excludes them, or after `jj file untrack`.
 - Merges diff against the first parent.
 - The float pane renders neither syntax highlighting nor the author
-  header.
+  or commit header.
 
 vim:tw=78:ts=8:ft=help:norl:

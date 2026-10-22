@@ -109,6 +109,27 @@ function M.author(root, ref)
   return name, when
 end
 
+-- Short hash and subject of the commit at `ref`, or nil on failure. An empty
+-- subject reads as "(no description)".
+function M.commit_info(root, ref)
+  local code, out = run(root, { "log", "-1", "--format=%h%x09%s", ref or "HEAD" })
+  if code ~= 0 then
+    return nil
+  end
+  local line = trim(out)
+  if line == "" then
+    return nil
+  end
+  local short, subject = line:match("^(.-)\t(.*)$")
+  if not short then
+    return nil
+  end
+  if subject == "" then
+    subject = "(no description)"
+  end
+  return short, subject
+end
+
 -- Directory entries the watcher treats as "the baseline may have moved". HEAD
 -- and the index are written via rename, so observing the directory is enough.
 function M.watch_names()

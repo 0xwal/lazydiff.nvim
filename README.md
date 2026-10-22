@@ -59,7 +59,7 @@ example `@-` or a change id, is used verbatim as the baseline. So
 Known limits: the jj backend lists no untracked paths when
 `snapshot.auto-track` excludes them or after `jj file untrack`; merges diff
 against the first parent; the float pane renders neither syntax
-highlighting nor the author header.
+highlighting nor the author or commit header.
 
 ## Install
 
@@ -210,6 +210,7 @@ require("lazydiff").setup({
   },
   show_hunk_header = true,       -- show "@@ -a,b +c,d @@" between hunks
   show_author_header = false,    -- append "author: Jane Doe · Aug 3 2025 (6 months ago)"
+  show_commit_header = false,    -- append "commit 79ed13f  bump version" (jj: "change ...")
   word_diff = true,              -- emphasise changed words inside change hunks
   highlights = {                 -- per-slot colour override; defaults below
     add = nil,                   -- group name, or { fg=, bg=, bold=, italic=, underline= }

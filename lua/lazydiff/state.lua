@@ -72,34 +72,47 @@ local function fetch_baseline(loc, ref)
 end
 
 -- Author label for the hunk header: "Jane Doe · Aug 3 2025 (6 months ago)".
--- Each lookup costs a subprocess and refresh runs on every change, so the
--- formatted label is memoized on the buffer state, keyed by the resolved repo
--- root plus the ref string. A failed lookup is memoized too, so a broken ref
--- does not respawn git or jj on every tick.
+-- Commit text for the hunk header: "commit abc1234  Fix parser" (jj: "change").
+-- Each lookup costs a subprocess and refresh runs on every change, so both
+-- strings are memoized on the buffer state, keyed by the resolved repo root
+-- plus the ref string. A failed lookup is memoized too, so a broken ref does
+-- not respawn git or jj on every tick. Returns label, commit (each nil when off).
 local function author_for(st, ref)
-  if not config.options.show_author_header or not st.backend or not st.repo then
+  if not (config.options.show_author_header or config.options.show_commit_header) then
     return nil
   end
-  if type(st.backend.author) ~= "function" then
+  if not st.backend or not st.repo then
     return nil
   end
   local key = (st.backend.name or "") .. "\0" .. st.repo .. "\0" .. tostring(ref)
   local cached = st.author_cache
   local now = os.time()
   if cached and cached.key == key and now - cached.at < 60 then
-    return cached.label
+    return cached.label, cached.commit
   end
-  local name, when = st.backend.author(st.repo, ref)
-  local label
-  if name then
-    if type(when) == "string" and when ~= "" then
-      label = name .. " · " .. when
-    else
-      label = name
+  local label, commit
+  if config.options.show_author_header and type(st.backend.author) == "function" then
+    local name, when = st.backend.author(st.repo, ref)
+    if name then
+      if type(when) == "string" and when ~= "" then
+        label = name .. " · " .. when
+      else
+        label = name
+      end
     end
   end
-  st.author_cache = { key = key, label = label, at = now }
-  return label
+  if config.options.show_commit_header and type(st.backend.commit_info) == "function" then
+    local ok, short, subject = pcall(st.backend.commit_info, st.repo, ref)
+    if ok and short then
+      local word = st.backend.name == "jj" and "change" or "commit"
+      commit = word .. " " .. short
+      if type(subject) == "string" and subject ~= "" then
+        commit = commit .. "  " .. subject
+      end
+    end
+  end
+  st.author_cache = { key = key, label = label, commit = commit, at = now }
+  return label, commit
 end
 
 local function recompute(bufnr, baseline)
@@ -333,7 +346,8 @@ function M.enable(bufnr, ref)
   state.hunks = hunks
   buffers[bufnr] = state
 
-  render.render(bufnr, hunks, state.baseline_lines, author_for(state, ref))
+  local author, commit = author_for(state, ref)
+  render.render(bufnr, hunks, state.baseline_lines, author, commit)
 
   if config.options.read_only then
     vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
@@ -465,7 +479,8 @@ function M.refresh(bufnr, opts)
 
   local hunks = recompute(bufnr, state.baseline)
   state.hunks = hunks
-  render.render(bufnr, hunks, state.baseline_lines, author_for(state, state.ref))
+  local author, commit = author_for(state, state.ref)
+  render.render(bufnr, hunks, state.baseline_lines, author, commit)
 end
 
 -- Register hunks computed elsewhere (the float's scratch pane) so nav.lua can
