@@ -174,7 +174,7 @@ function M.quickfix(ref)
         -- jj and git report the new path for a rename or copy, and that path
         -- does not exist at the baseline, so the baseline read uses the old
         -- path while the working-tree read and the qf filename keep the new one.
-        local blob = backend.file_at(root, entry.old_path or entry.path, ref)
+        local blob, _, reason = backend.file_at(root, entry.old_path or entry.path, ref)
         if blob and not path_util.is_binary(blob) then
           local old_lines = path_util.split_lines(blob)
           -- The path can vanish between the stat above and this read. A
@@ -199,7 +199,7 @@ function M.quickfix(ref)
               text = "unreadable path",
             }
           end
-        elseif not blob then
+        elseif not blob and reason ~= "untracked" then
           skipped[#skipped + 1] = entry.path
         end
       end

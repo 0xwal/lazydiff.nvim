@@ -121,7 +121,7 @@ commit. See |:LazydiffQf|.
     Items for paths that are not regular files, or that cannot be read,
     carry `valid = 0`, so `:cc` and `:cn` skip them. When a changed path
     has no baseline blob, the plugin prints one warning that names up to
-    three such paths.
+    three such paths. Added files are skipped silently.
 
                                                              *:LazydiffSearch*
     :LazydiffSearch [{ref}]
