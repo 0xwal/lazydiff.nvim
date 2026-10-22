@@ -123,6 +123,18 @@ commit. See |:LazydiffQf|.
     has no baseline blob, the plugin prints one warning that names up to
     three such paths.
 
+                                                             *:LazydiffSearch*
+    :LazydiffSearch [{ref}]
+    Open a floating picker that lists the changed files of the working tree
+    against {ref}. Ref order: {ref}, then the session ref, then the configured
+    `ref`. The first line is a prompt; typing filters the list by a
+    case-insensitive substring of the path. Rows show `+added -deleted`,
+    `dir` for directories, `bin` for binary files, or `big` for files over
+    5000 lines or 1 MB (not diffed). Keys in the prompt:
+    `<CR>` open the selected file, `<C-n>` or `<Down>` next row, `<C-p>` or
+    `<Up>` previous row, `<Esc>` close. Leaving the window closes the picker.
+    At most 500 files are listed; the rest are counted in a `... N more` row.
+
 ==============================================================================
 4. FLOAT MODE                                                  *lazydiff-float*
 

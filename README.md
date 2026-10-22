@@ -108,6 +108,7 @@ use({
 | `:LazydiffStart`      | Start a session: entered files diff against `{ref}`, else `config.options.ref` |
 | `:LazydiffStop`       | End the session and disable the overlays it enabled             |
 | `:LazydiffQf [ref]`   | One quickfix item per hunk against `ref`; works without a session |
+| `:LazydiffSearch [ref]` | Floating picker of changed files; type to filter, `<CR>` opens the file |
 
 `ref` completes against branches and tags. `:Lazydiff main` reviews the
 buffer against `main`; running it again with the same ref turns the overlay

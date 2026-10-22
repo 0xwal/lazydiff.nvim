@@ -129,13 +129,17 @@ function M.goto_next_all()
   M.goto_first(buf)
 end
 
+-- Ref order for commands: explicit arg, then session ref, then config.
+function M.resolve_ref(ref)
+  return ref or require("lazydiff.session").ref or require("lazydiff.config").options.ref
+end
+
 -- One quickfix entry per hunk across all changed files of `ref`.
 function M.quickfix(ref)
-  local config = require("lazydiff.config")
   local vcs = require("lazydiff.vcs")
   local diff_mod = require("lazydiff.diff")
   local path_util = require("lazydiff.path")
-  ref = ref or require("lazydiff.session").ref or config.options.ref
+  ref = M.resolve_ref(ref)
 
   local backend, err, root = vcs.get(vcs.anchor_dir())
   if not backend then

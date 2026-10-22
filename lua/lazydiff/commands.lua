@@ -105,6 +105,14 @@ function M.setup()
     complete = complete_refs,
     desc = "Fill the quickfix list with one entry per lazydiff hunk (optionally against a ref)",
   })
+
+  cmd("LazydiffSearch", function(c)
+    require("lazydiff.search").open(ref_arg(c))
+  end, {
+    nargs = "?",
+    complete = complete_refs,
+    desc = "Open a floating picker of changed files with a live path filter (optionally against a ref)",
+  })
 end
 
 return M
