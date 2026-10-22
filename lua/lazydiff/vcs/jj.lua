@@ -228,10 +228,8 @@ local function tracked_paths(root, ref)
   return paths
 end
 
--- `ref` names the old state in the adapter contract, but a jj revset names
--- the change itself: `-r @` is the working-copy commit, whose content is
--- exactly what the buffer already holds. The old state is the first parent,
--- spelled as the `first_parent` revset function.
+-- The old state is the first parent of the resolved ref, spelled as the
+-- `first_parent` revset function.
 local function parent_rev(rev)
   return "first_parent(" .. rev .. ")"
 end
@@ -261,19 +259,15 @@ local function has_no_parent(root, ref)
   return none
 end
 
--- `ref` is a baseline: the plugin compares the working copy against it, like
--- `git diff <ref>`. `@`, "" and HEAD mean "the working copy", so the baseline
--- is its first parent; any other ref ("@-", a change id) already names a past
--- revision and is used verbatim -- no parent step. `first_parent(@)` has no
--- value when `@` is the root commit, and that makes the revset an error;
--- root() is the empty tree, the same baseline spelled in a form that always
--- resolves. Shared by the file listing, the file content lookup and the author
--- lookup so all three name the same baseline.
+-- Returns `resolved, target`. `target` is the revision whose content is the
+-- baseline. `@`, "" and HEAD mean "the working copy", so the target is its
+-- first parent. Any other ref (a change id, `@-`, a bookmark) means "own
+-- change": the target is that ref's first parent. A ref with no parent uses
+-- root(), the empty tree, because `first_parent(...)` has no value there and
+-- the revset would be an error. Shared by the file listing, the file content
+-- lookup and the author lookup so all three name the same target.
 function baseline(root, ref)
   local resolved = resolve_ref(ref)
-  if resolved ~= "@" then
-    return resolved, resolved
-  end
   if has_no_parent(root, resolved) then
     return resolved, "root()"
   end
@@ -354,9 +348,9 @@ local function split_rename(text)
 end
 
 -- `jj diff --from <baseline> --to @ --summary` emits one `STATUS path` line per
--- file; STATUS is the same letter git uses. The baseline is the resolved ref,
--- so `@` diffs the working copy against its parent and `@-` diffs it against
--- `@-` itself. A path that jj does not track -- because `snapshot.auto-track`
+-- file; STATUS is the same letter git uses. The baseline is the target: `@`
+-- diffs the working copy against its parent, and any other ref diffs the
+-- working copy against that ref's parent. A path that jj does not track -- because `snapshot.auto-track`
 -- is restricted or the path was `jj file untrack`ed -- never appears in this
 -- diff, so such a file is missing from the list rather than reported untracked.
 -- No line counts are reported either.
