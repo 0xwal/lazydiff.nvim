@@ -72,7 +72,7 @@ local function fetch_baseline(loc, ref)
 end
 
 -- Author label for the hunk header: "Jane Doe · Aug 3 2025 (6 months ago)".
--- Commit text for the hunk header: "commit abc1234  Fix parser" (jj: "change").
+-- Commit text for the hunk header: "[abc1234] - Fix parser" (jj: "[uyknllow] - ...").
 -- Each lookup costs a subprocess and refresh runs on every change, so both
 -- strings are memoized on the buffer state, keyed by the resolved repo root
 -- plus the ref string. A failed lookup is memoized too, so a broken ref does
@@ -104,11 +104,10 @@ local function author_for(st, ref)
   if config.options.show_commit_header and type(st.backend.commit_info) == "function" then
     local ok, short, subject = pcall(st.backend.commit_info, st.repo, ref)
     if ok and short then
-      local word = st.backend.name == "jj" and "change" or "commit"
-      commit = word .. " " .. short
-      if type(subject) == "string" and subject ~= "" then
-        commit = commit .. "  " .. subject
+      if type(subject) ~= "string" or subject == "" then
+        subject = "(no description)"
       end
+      commit = "[" .. short .. "] - " .. subject
     end
   end
   st.author_cache = { key = key, label = label, commit = commit, at = now }

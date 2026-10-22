@@ -210,7 +210,7 @@ require("lazydiff").setup({
   },
   show_hunk_header = true,       -- show "@@ -a,b +c,d @@" between hunks
   show_author_header = false,    -- append "author: Jane Doe · Aug 3 2025 (6 months ago)"
-  show_commit_header = false,    -- append "commit 79ed13f  bump version" (jj: "change ...")
+  show_commit_header = false,    -- append "[79ed13f] - bump version" (jj: "[uyknllow] - bump version")
   word_diff = true,              -- emphasise changed words inside change hunks
   highlights = {                 -- per-slot colour override; defaults below
     add = nil,                   -- group name, or { fg=, bg=, bold=, italic=, underline= }

@@ -250,8 +250,8 @@ Defaults:
                     Append the baseline's short commit id and the first
                     line of its message to the header line, after the
                     author text, separated by two spaces. jj shows
-                    `change uyknllow  bump version`; git shows
-                    `commit 79ed13f  bump version`. The commit is the
+                    `[uyknllow] - bump version`; git shows
+                    `[79ed13f] - bump version`. The commit is the
                     baseline commit, the same revision the author comes
                     from. An empty message shows `(no description)`. The
                     option is independent of `show_author_header` and
