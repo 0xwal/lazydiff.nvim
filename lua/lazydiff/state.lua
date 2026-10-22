@@ -300,9 +300,11 @@ function M.enable(bufnr, ref)
   end
 
   local baseline, berr, reason = fetch_baseline(loc, ref)
+  local untracked = false
   if not baseline then
     if reason == "untracked" then
       baseline = {}
+      untracked = true
     else
       notify(berr, vim.log.levels.WARN)
       return false
@@ -317,6 +319,7 @@ function M.enable(bufnr, ref)
   end
   state.enabled = true
   state.external = nil
+  state.untracked = untracked
   state.ref = ref
   -- The ref just changed, so the memoized author label no longer applies.
   state.author_cache = nil
@@ -429,11 +432,13 @@ function M.refresh(bufnr, opts)
       if baseline then
         state.baseline = baseline
         state.baseline_lines = baseline
+        state.untracked = false
       elseif reason == "untracked" then
         -- The file vanished from `ref` (e.g. checkout of an older branch):
         -- everything in the buffer is now new.
         state.baseline = {}
         state.baseline_lines = state.baseline
+        state.untracked = true
       else
         fetch_failed = true
       end
@@ -521,13 +526,30 @@ end
 -- "reject this change" action when reviewing a patch.
 function M.reset_hunk(bufnr)
   bufnr = resolve(bufnr)
-  local hunk, err, _, state = hunk_under_cursor(bufnr)
-  if not hunk then
-    notify(err, vim.log.levels.WARN)
+  local state = buffers[bufnr]
+  if not state or not state.enabled then
+    vim.notify("lazydiff: not enabled in this buffer", vim.log.levels.WARN)
     return false
   end
   if state.external then
     notify("review pane is read-only; open the file with <CR> to edit", vim.log.levels.WARN)
+    return false
+  end
+  if state.baseline_lines == nil then
+    vim.notify("lazydiff: no baseline for this file", vim.log.levels.WARN)
+    return false
+  end
+  if state.untracked then
+    vim.notify("lazydiff: untracked file, nothing to revert to", vim.log.levels.WARN)
+    return false
+  end
+  if vim.bo[bufnr].modifiable == false then
+    vim.notify("lazydiff: buffer is not modifiable", vim.log.levels.WARN)
+    return false
+  end
+  local hunk, err = hunk_under_cursor(bufnr)
+  if not hunk then
+    notify(err, vim.log.levels.WARN)
     return false
   end
 
@@ -536,10 +558,7 @@ function M.reset_hunk(bufnr)
   local first = hunk.new_count > 0 and hunk.new_start - 1 or hunk.new_start
   local last = first + hunk.new_count
 
-  local was_modifiable = vim.bo[bufnr].modifiable
-  vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, first, last, false, hunk.old_lines)
-  vim.bo[bufnr].modifiable = was_modifiable
 
   M.refresh(bufnr)
   return true

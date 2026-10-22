@@ -78,7 +78,13 @@ commit. See |:LazydiffQf|.
 :LazydiffReset
     Put the baseline's lines back in place of the hunk under the cursor.
     On an added block this deletes it; on a deleted block it reinserts the
-    red lines. The buffer is made modifiable for the edit if needed.
+    red lines. Nothing changes and a WARN message is shown when:
+      - the buffer is not enabled by lazydiff
+      - the review pane is read-only (external)
+      - there is no baseline for the file
+      - the file is untracked, so there is nothing to revert to
+      - the buffer is not modifiable
+      - there is no hunk under the cursor
 
                                                                *:LazydiffYank*
 :LazydiffYank [{register}]
