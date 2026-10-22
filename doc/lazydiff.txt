@@ -1,4 +1,4 @@
-*lazydiff.txt*    Inline, lazygit-style diff overlay for the buffer you're editing
+*lazydiff.txt*    Inline lazygit-style diff overlay
 
 Author:  rashed parvez
 License: MIT
@@ -14,21 +14,34 @@ CONTENTS                                                    *lazydiff-contents*
   6. Configuration .......................... |lazydiff-config|
   7. Highlight groups ....................... |lazydiff-highlights|
   8. Health ................................. |lazydiff-health|
+  9. Known limitations ...................... |lazydiff-limitations|
 
 ==============================================================================
 1. INTRODUCTION                                         *lazydiff-introduction*
 
-lazydiff renders the diff between the buffer and a git ref (default `HEAD`)
-in place, using extmarks: deleted lines appear as red virtual lines above
-their old position, added lines get a `+` in the sign column and a coloured
-band, and a `@@ -a,b +c,d @@` header sits above each hunk. The buffer stays
-editable; the overlay repaints as you type.
+lazydiff renders the diff between the buffer and a baseline revision
+(default `HEAD`) in place, using extmarks: deleted lines appear as red
+virtual lines above their old position, added lines get a `+` in the sign
+column and a coloured band, and a `@@ -a,b +c,d @@` header sits above each
+hunk. The buffer stays editable; the overlay repaints as you type.
+
+The ref is a baseline. The plugin compares the working tree against that
+revision; it never shows the change the revision introduced.
+
+- git backend: `git diff <ref>`; the baseline blob is `git show <ref>:path`.
+- jj backend: `@`, an empty ref and `HEAD` name the working-copy commit, so
+  the baseline is its first parent, `first_parent(@)` = `@-`. Any other
+  ref, for example `@-` or a change id, is used verbatim as the baseline.
+
+So `:LazydiffQf @-` lists the uncommitted changes since the previous
+commit. See |:LazydiffQf|.
 
 ==============================================================================
 2. REQUIREMENTS                                         *lazydiff-requirements*
 
 - Neovim 0.10 or newer
-- `git` on `$PATH`
+- `git` on `$PATH`, or `jj` for a jj repository; the `.jj` marker selects
+  that backend
 
 ==============================================================================
 3. COMMANDS                                                 *lazydiff-commands*
@@ -51,11 +64,15 @@ editable; the overlay repaints as you type.
 :LazydiffRefresh
     Refetch the baseline blob from git and re-render.
 
-                                       *:LazydiffNext* *:LazydiffPrev* *:LazydiffFirst*
-:LazydiffNext
+                                                           *:LazydiffNext*
+                                                           *:LazydiffPrev*
+                                                          *:LazydiffFirst*
+:LazydiffNext [{mode}]
 :LazydiffPrev
 :LazydiffFirst
     Move the cursor between hunks. `]h` / `[h` wrap when `nav.wrap` is set.
+    {mode} is `buffer` (default), which walks this buffer's hunks, or
+    `all`, which continues into the hunks of the other changed files.
 
                                                               *:LazydiffReset*
 :LazydiffReset
@@ -77,6 +94,28 @@ editable; the overlay repaints as you type.
                                                            *:LazydiffFloatOff*
 :LazydiffFloatOff
     Close the float.
+
+                                                             *:LazydiffStart*
+:LazydiffStart [{ref}]
+    Start a session. A buffer entered while the session is active gets the
+    overlay when its file differs from {ref} or, without {ref}, from the
+    configured `ref`. |:LazydiffStop| ends the session.
+
+                                                              *:LazydiffStop*
+:LazydiffStop
+    End the session and disable the overlays it enabled. A ref passed to
+    |:LazydiffStart| is not reset, so a later |:LazydiffQf| without an
+    argument keeps using it.
+
+                                                                 *:LazydiffQf*
+:LazydiffQf [{ref}]
+    Fill the quickfix list with one item per hunk of the working tree
+    against {ref}, and open it. No |:LazydiffStart| session is needed. The
+    ref order is: {ref}, then the session ref, then the configured `ref`.
+    Items for paths that are not regular files, or that cannot be read,
+    carry `valid = 0`, so `:cc` and `:cn` skip them. When a changed path
+    has no baseline blob, the plugin prints one warning that names up to
+    three such paths.
 
 ==============================================================================
 4. FLOAT MODE                                                  *lazydiff-float*
@@ -129,8 +168,10 @@ Defaults:
 >lua
   require("lazydiff").setup({
     ref = "HEAD",
+    vcs = "auto",
     signs = { add = "+", delete = "- " },
     show_hunk_header = true,
+    show_author_header = false,
     word_diff = true,
     read_only = false,
     auto_refresh = true,
@@ -166,9 +207,24 @@ Defaults:
   })
 <
 `ref`               Ref the working tree is diffed against.
+`vcs`               Backend to use: `auto` picks by the `.jj` / `.git`
+                    marker nearest the buffer, `git` and `jj` force one and
+                    skip detection entirely.
 `signs.add`         Sign-column marker on added lines (max 2 cells).
 `signs.delete`      Prefix on the virtual lines showing deleted content.
 `show_hunk_header`  Show `@@ -a,b +c,d @@` above each hunk.
+`show_author_header`
+                    Append the baseline's author to the header line, as
+                    `author: Jane Doe · Aug 3 2025 (6 months ago)`. The
+                    date is the baseline revision's author date. The
+                    relative part is English and is refreshed on each
+                    render, cached for at most 60 seconds; jj supplies the
+                    age phrase itself. Both options are independent: hunk
+                    header on and author on puts the author text after the
+                    `@@` text on the same line; hunk header off and author
+                    on puts the author text alone; both off drops the
+                    header line. A nil author, or an unreadable date,
+                    leaves the name only, or no header line.
 `word_diff`         Emphasise changed words inside change hunks whose lines
                     pair up one-to-one.
 `read_only`         Lock the buffer while the overlay is on.
@@ -204,7 +260,9 @@ re-applied on |ColorScheme|.
   LazydiffDeleteWord   changed span on a deleted virtual line
   LazydiffAddSign      the `+` sign
   LazydiffDeleteSign   the `- ` prefix
-  LazydiffHunkHeader   the `@@` line
+  LazydiffHunkHeader   the `@@` line and the author text; links to
+                       `Comment`; set the `highlights.hunk_header` slot to
+                       override it
 
 Float mode: LazydiffStatusModified, LazydiffStatusAdded,
 LazydiffStatusDeleted, LazydiffStatusRenamed, LazydiffStatusUntracked,
@@ -214,7 +272,17 @@ LazydiffFloatTitle, LazydiffFloatSelected, LazydiffFold.
 ==============================================================================
 8. HEALTH                                                     *lazydiff-health*
 
-`:checkhealth lazydiff` verifies the Neovim version, that `git` is on
-`$PATH`, and that the current configuration validates.
+`:checkhealth lazydiff` verifies the Neovim version, probes each backend
+(`git`, `jj`) on `$PATH`, reports the repository the current buffer
+resolves to, and checks that the configuration validates.
+
+==============================================================================
+9. KNOWN LIMITATIONS                               *lazydiff-limitations*
+
+- The jj backend does not list untracked paths when `snapshot.auto-track`
+  excludes them, or after `jj file untrack`.
+- Merges diff against the first parent.
+- The float pane renders neither syntax highlighting nor the author
+  header.
 
 vim:tw=78:ts=8:ft=help:norl:

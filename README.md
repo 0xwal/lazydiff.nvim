@@ -47,8 +47,19 @@ float.
 
 Run `:checkhealth lazydiff` to confirm both.
 
-For jj, the plugin compares against the parent of the selected revision, so
-`:Lazydiff @` diffs the working copy against its parent.
+The ref is always a **baseline**: the plugin compares the working tree
+against that revision, never "the change that revision introduced". For
+`git`, `git diff <ref>`.
+
+For jj, `@`, an empty ref and `HEAD` name the working-copy commit, so the
+baseline is its first parent (`first_parent(@)` = `@-`). Any other ref, for
+example `@-` or a change id, is used verbatim as the baseline. So
+`:LazydiffQf @-` lists the uncommitted changes since the previous commit.
+
+Known limits: the jj backend lists no untracked paths when
+`snapshot.auto-track` excludes them or after `jj file untrack`; merges diff
+against the first parent; the float pane renders neither syntax
+highlighting nor the author header.
 
 ## Install
 
@@ -87,15 +98,16 @@ use({
 | `:Lazydiff [ref]`     | Toggle the overlay on the current buffer, optionally against `ref` |
 | `:LazydiffOff`        | Disable the overlay on the current buffer                       |
 | `:LazydiffRefresh`    | Refetch the baseline from git and re-render                     |
-| `:LazydiffNext`       | Jump to the next hunk                                           |
+| `:LazydiffNext [mode]` | Jump to the next hunk; `buffer` (default) or `all`             |
 | `:LazydiffPrev`       | Jump to the previous hunk                                       |
 | `:LazydiffFirst`      | Jump to the first hunk                                          |
 | `:LazydiffReset`      | Revert the hunk under the cursor to the baseline                |
 | `:LazydiffYank [reg]` | Yank the hunk's deleted lines into a register (default `"`)     |
 | `:LazydiffFloat [ref]`| Toggle the float over **every** changed file, optionally against `ref` |
 | `:LazydiffFloatOff`   | Close the float                                                 |
-| `:LazydiffStart`      | Start a session: entered files with changes against `config.options.ref` get the overlay |
+| `:LazydiffStart`      | Start a session: entered files diff against `{ref}`, else `config.options.ref` |
 | `:LazydiffStop`       | End the session and disable the overlays it enabled             |
+| `:LazydiffQf [ref]`   | One quickfix item per hunk against `ref`; works without a session |
 
 `ref` completes against branches and tags. `:Lazydiff main` reviews the
 buffer against `main`; running it again with the same ref turns the overlay
@@ -196,6 +208,7 @@ require("lazydiff").setup({
     delete = "- ",               -- prefix on virt_lines for deleted content
   },
   show_hunk_header = true,       -- show "@@ -a,b +c,d @@" between hunks
+  show_author_header = false,    -- append "author: Jane Doe · Aug 3 2025 (6 months ago)"
   word_diff = true,              -- emphasise changed words inside change hunks
   highlights = {                 -- per-slot colour override; defaults below
     add = nil,                   -- group name, or { fg=, bg=, bold=, italic=, underline= }
@@ -248,7 +261,8 @@ require("lazydiff").setup({
 
 `highlights` takes seven optional slots: `add`, `delete`, `add_word`,
 `delete_word`, `add_sign`, `delete_sign`, `hunk_header`. `hunk_header` styles
-the `@@ -a,b +c,d @@` header and links to `Comment` by default. Give a slot a highlight group name
+the `@@ -a,b +c,d @@` header line and the author text, and links to
+`Comment` by default. Give a slot a highlight group name
 (a string) or a spec table with `fg`, `bg`, `bold`, `italic`, `underline`. An
 unset add-side slot falls back to `DiffAdd`, an unset delete-side slot to
 `DiffDelete`, and a `Lazydiff*` group you define yourself still wins.
