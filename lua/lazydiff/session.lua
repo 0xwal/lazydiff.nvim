@@ -84,6 +84,15 @@ function M.start(ref)
       M.check(args.buf)
     end,
   })
+  if ref then
+    local state = require("lazydiff.state")
+    for _, bufnr in ipairs(M.enabled_bufs) do
+      local status = vim.api.nvim_buf_is_valid(bufnr) and state.status(bufnr)
+      if status and status.ref ~= ref then
+        require("lazydiff").enable(bufnr, ref)
+      end
+    end
+  end
   M.check(vim.api.nvim_get_current_buf())
 end
 
