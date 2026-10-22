@@ -106,12 +106,18 @@ function M.setup()
     desc = "Fill the quickfix list with one entry per lazydiff hunk (optionally against a ref)",
   })
 
-  cmd("LazydiffSearch", function(c)
-    require("lazydiff.search").open(ref_arg(c))
+  cmd("LazydiffOpen", function(c)
+    require("lazydiff.open").open(c.args)
   end, {
-    nargs = "?",
-    complete = complete_refs,
-    desc = "Open a floating picker of changed files with a live path filter (optionally against a ref)",
+    nargs = "*",
+    complete = function(arglead)
+      local out = vim.tbl_filter(function(pos)
+        return pos:sub(1, #arglead) == arglead
+      end, { "left", "right", "bottom", "float" })
+      vim.list_extend(out, complete_refs(arglead))
+      return out
+    end,
+    desc = "List changed files in a read-only buffer (optionally a ref and left|right|bottom|float)",
   })
 end
 

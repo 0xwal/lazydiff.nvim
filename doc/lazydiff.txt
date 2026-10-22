@@ -123,17 +123,22 @@ commit. See |:LazydiffQf|.
     has no baseline blob, the plugin prints one warning that names up to
     three such paths. Added files are skipped silently.
 
-                                                             *:LazydiffSearch*
-    :LazydiffSearch [{ref}]
-    Open a floating picker that lists the changed files of the working tree
-    against {ref}. Ref order: {ref}, then the session ref, then the configured
-    `ref`. The first line is a prompt; typing filters the list by a
-    case-insensitive substring of the path. Rows show `+added -deleted`,
-    `dir` for directories, `bin` for binary files, or `big` for files over
-    5000 lines or 1 MB (not diffed). Keys in the prompt:
-    `<CR>` open the selected file, `<C-n>` or `<Down>` next row, `<C-p>` or
-    `<Up>` previous row, `<Esc>` close. Leaving the window closes the picker.
-    At most 500 files are listed; the rest are counted in a `... N more` row.
+                                                              *:LazydiffOpen*
+:LazydiffOpen [{ref}] [{position}]
+    Open a read-only buffer that lists the changed files of the working
+    tree against {ref}. {position} is `left`, `right`, `bottom` or `float`.
+    Default is `bottom`. Ref and position may come in either order. Ref
+    order: {ref}, then the session ref, then the configured `ref`. Each row
+    is `<path>  +<added> -<deleted>`. Rows show `dir` for directories, `bin`
+    for binary files, `big` for files over 5000 lines or 1 MB (not diffed),
+    and `unreadable` when the baseline or file cannot be read. Deleted files
+    show only deleted lines, and untracked files show only added lines.
+    Keys, normal mode only:
+    `<CR>` open the file under the cursor in the window that was active
+    before the command. Directories, binary files and deleted files are not
+    opened. `q` close the window and wipe the buffer. Other keys are the
+    normal Vim keys. Leaving the window does not close it. At most 500 files
+    are listed; the rest are counted in a `... N more` row.
 
 ==============================================================================
 4. FLOAT MODE                                                  *lazydiff-float*
