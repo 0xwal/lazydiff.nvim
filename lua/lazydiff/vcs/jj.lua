@@ -94,7 +94,7 @@ function M.refs(root)
   add("@-")
 
   local log_code, log_out =
-    run(root, { "log", "-r", "::@", "--limit", "50", "--no-graph", "-T", 'change_id ++ "\\n"' })
+    run(root, { "log", "-r", "::@-", "--limit", "50", "--no-graph", "-T", 'change_id ++ "\\n"' })
   if log_code == 0 then
     for _, line in ipairs(lines_of(log_out)) do
       add(trim(line))
@@ -121,11 +121,15 @@ local AUTHOR_TEMPLATE =
 -- Author name and the formatted author date ("Aug 3 2025 (6 months ago)") of
 -- the change at `ref`, or nil on failure. The date is nil when the template
 -- output is malformed, so the caller shows the bare name.
+-- Forward declaration: the baseline mapping lives below its first user here.
+local baseline
 function M.author(root, ref)
-  ref = resolve_ref(ref)
+  -- The header must name the revision whose content is diffed against, which is
+  -- the baseline, not the working-copy ref.
+  local _, target = baseline(root, ref)
   -- --limit 1 keeps a multi-commit revset from reporting the tip's author.
   local code, out =
-    run(root, { "log", "-r", ref, "--limit", "1", "--no-graph", "-T", AUTHOR_TEMPLATE })
+    run(root, { "log", "-r", target, "--limit", "1", "--no-graph", "-T", AUTHOR_TEMPLATE })
   if code ~= 0 then
     return nil
   end
@@ -232,26 +236,68 @@ local function parent_rev(rev)
   return "first_parent(" .. rev .. ")"
 end
 
+-- Parent probes, keyed by root and resolved ref. The probe runs once per
+-- changed path otherwise, and a working copy can gain a parent after `jj new`,
+-- so an entry expires after a few seconds.
+local PARENT_PROBE_TTL_MS = 5000
+local parent_probe_cache = {}
+
+-- True when `ref` has no parents (the root commit), so a parent-based baseline
+-- resolves to nothing.
+local function has_no_parent(root, ref)
+  local key = root .. "\0" .. ref
+  local now = vim.uv.now()
+  local cached = parent_probe_cache[key]
+  if cached and now - cached.time < PARENT_PROBE_TTL_MS then
+    return cached.none
+  end
+  local code, out =
+    run(root, { "log", "-r", ref, "--no-graph", "-T", 'parents.map(|c| c.commit_id()).join(",")' })
+  if code ~= 0 then
+    return false
+  end
+  local none = trim(out) == ""
+  parent_probe_cache[key] = { none = none, time = now }
+  return none
+end
+
+-- `ref` is a baseline: the plugin compares the working copy against it, like
+-- `git diff <ref>`. `@`, "" and HEAD mean "the working copy", so the baseline
+-- is its first parent; any other ref ("@-", a change id) already names a past
+-- revision and is used verbatim -- no parent step. `first_parent(@)` has no
+-- value when `@` is the root commit, and that makes the revset an error;
+-- root() is the empty tree, the same baseline spelled in a form that always
+-- resolves. Shared by the file listing, the file content lookup and the author
+-- lookup so all three name the same baseline.
+function baseline(root, ref)
+  local resolved = resolve_ref(ref)
+  if resolved ~= "@" then
+    return resolved, resolved
+  end
+  if has_no_parent(root, resolved) then
+    return resolved, "root()"
+  end
+  return resolved, parent_rev(resolved)
+end
+
 -- Same contract as the git adapter: content, or nil + message + reason, with
 -- reason "untracked" when the path simply does not exist at the baseline.
 -- A revision with no parent (the root commit) has an empty baseline, so it
 -- comes back as reason "untracked" too. Every other failure comes back as
 -- reason "error" and nothing throws.
 function M.file_at(root, relpath, ref)
-  ref = resolve_ref(ref)
-  local prev = parent_rev(ref)
-  local code, out, err = run(root, { "file", "show", "-r", prev, "--", relpath })
+  local resolved, base = baseline(root, ref)
+  local code, out, err = run(root, { "file", "show", "-r", base, "--", relpath })
   if code == 0 then
     return out, nil
   end
-  local parent_code, parent_out =
-    run(root, { "log", "-r", ref, "--no-graph", "-T", 'parents.map(|c| c.commit_id()).join(",")' })
-  if parent_code == 0 and trim(parent_out) == "" then
-    return nil, "revision " .. ref .. " has no parent", "untracked"
+  if base == "root()" then
+    return nil, "revision " .. resolved .. " has no parent", "untracked"
   end
-  local paths = tracked_paths(root, prev)
+  local paths = tracked_paths(root, base)
   if paths and not paths[relpath] then
-    return nil, "file is not tracked at " .. ref, "untracked"
+    -- Name the revision that was probed, not the working-copy ref.
+    return nil, "file is not tracked at " .. base, "untracked"
   end
   local msg = trim(err)
   return nil, msg ~= "" and msg or ("jj file show failed for " .. relpath), "error"
@@ -307,15 +353,19 @@ local function split_rename(text)
   return nil, text
 end
 
--- `jj diff -r <ref> --summary` emits one `STATUS path` line per file; STATUS is
--- the same letter git uses. jj always tracks whatever is in the working copy,
--- so there is no untracked class and no line counts to report.
+-- `jj diff --from <baseline> --to @ --summary` emits one `STATUS path` line per
+-- file; STATUS is the same letter git uses. The baseline is the resolved ref,
+-- so `@` diffs the working copy against its parent and `@-` diffs it against
+-- `@-` itself. A path that jj does not track -- because `snapshot.auto-track`
+-- is restricted or the path was `jj file untrack`ed -- never appears in this
+-- diff, so such a file is missing from the list rather than reported untracked.
+-- No line counts are reported either.
 function M.changed_files(root, ref)
-  ref = resolve_ref(ref)
-  local code, out, err = run(root, { "diff", "-r", ref, "--summary" })
+  local _, base = baseline(root, ref)
+  local code, out, err = run(root, { "diff", "--from", base, "--to", "@", "--summary" })
   if code ~= 0 then
     local msg = trim(err)
-    return nil, msg ~= "" and msg or ("jj diff failed against " .. ref)
+    return nil, msg ~= "" and msg or ("jj diff failed against " .. base)
   end
 
   local list = {}
