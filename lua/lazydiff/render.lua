@@ -225,6 +225,10 @@ local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_
       local sep = #chunks > 0 and "  " or ""
       chunks[#chunks + 1] = { sep .. commit, "LazydiffHunkHeader" }
     end
+    local prefix = config.options.header_prefix
+    if type(prefix) == "string" and prefix ~= "" and #chunks > 0 then
+      chunks[1][1] = prefix .. " " .. chunks[1][1]
+    end
     lines[#lines + 1] = chunks
   end
   for i, content in ipairs(hunk.old_lines) do
