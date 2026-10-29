@@ -154,7 +154,7 @@ end
 -- Short change id and first line of the description at `ref`, or nil on
 -- failure. An empty description reads as "(no description)".
 function M.commit_info(root, ref)
-  local _, target = baseline(root, ref)
+  local target = resolve_ref(ref)
   local code, out = run(
     root,
     {
@@ -180,7 +180,13 @@ function M.commit_info(root, ref)
   if subject == "" then
     subject = "(no description)"
   end
-  return short, subject
+  local wcode, wout = run(root, { "log", "-r", "@", "--no-graph", "-T", "change_id.short(8)" })
+  local wid = nil
+  if wcode == 0 then
+    wid = trim(wout)
+    if wid == "" then wid = nil end
+  end
+  return short, subject, wid
 end
 
 -- Tracked-path sets, keyed by root and ref. A failed `file show` asks whether

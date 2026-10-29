@@ -102,12 +102,15 @@ local function author_for(st, ref)
     end
   end
   if config.options.show_commit_header and type(st.backend.commit_info) == "function" then
-    local ok, short, subject = pcall(st.backend.commit_info, st.repo, ref)
+    local ok, short, subject, id = pcall(st.backend.commit_info, st.repo, ref)
     if ok and short then
       if type(subject) ~= "string" or subject == "" then
         subject = "(no description)"
       end
       commit = "[" .. short .. "] - " .. subject
+      if type(id) == "string" and id ~= "" then
+        commit = commit .. " | " .. id
+      end
     end
   end
   st.author_cache = { key = key, label = label, commit = commit, at = now }

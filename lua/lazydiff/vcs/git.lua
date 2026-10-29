@@ -112,7 +112,7 @@ end
 -- Short hash and subject of the commit at `ref`, or nil on failure. An empty
 -- subject reads as "(no description)".
 function M.commit_info(root, ref)
-  local code, out = run(root, { "log", "-1", "--format=%h%x09%s", ref or "HEAD" })
+  local code, out = run(root, { "log", "-1", "--format=%h%x09%s%x09%h", ref or "HEAD" })
   if code ~= 0 then
     return nil
   end
@@ -120,14 +120,21 @@ function M.commit_info(root, ref)
   if line == "" then
     return nil
   end
-  local short, subject = line:match("^(.-)\t(.*)$")
+  local short, subject, id = line:match("^(.-)\t(.-)\t(.*)$")
+  if not short then
+    short, subject = line:match("^(.-)\t(.*)$")
+    id = nil
+  end
   if not short then
     return nil
   end
   if subject == "" then
     subject = "(no description)"
   end
-  return short, subject
+  if id == "" then
+    id = nil
+  end
+  return short, subject, id
 end
 
 -- Directory entries the watcher treats as "the baseline may have moved". HEAD
