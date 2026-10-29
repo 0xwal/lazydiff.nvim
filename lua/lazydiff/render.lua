@@ -218,7 +218,8 @@ local function build_above_virt_lines(bufnr, hunk, signs, show_header, old_word_
       chunks[#chunks + 1] = { diff_mod.format_hunk_header(hunk), "LazydiffHunkHeader" }
     end
     if show_author then
-      chunks[#chunks + 1] = { "  author: " .. author, "LazydiffHunkHeader" }
+      local sep = #chunks > 0 and "  " or ""
+      chunks[#chunks + 1] = { sep .. "author: " .. author, "LazydiffHunkHeader" }
     end
     if show_commit then
       local sep = #chunks > 0 and "  " or ""
